@@ -1,30 +1,40 @@
-# موسيقى السيارة (CarMusic)
+# Peugeot Car Music
 
-تطبيق Android يبدأ تشغيل قائمة أغاني محلية عند اتصال الهاتف **بسيارة Bluetooth التي تختارها**. اختيار السيارة من الأجهزة المقترنة يثبت عنوانها، لذلك لا يبدأ التشغيل عند الاتصال بسماعة أو جهاز Bluetooth آخر. يقرأ ملفات الموسيقى التي تختارها من الهاتف؛ لا يشغّل قوائم Spotify أو YouTube.
+An Android app that plays a local playlist when the phone connects to the paired car selected in the app. The app matches the saved Bluetooth device address so another speaker or headset will not trigger playback. It plays local audio files selected by the user; it does not control Spotify or YouTube.
 
-## الاستخدام
+## Features
 
-1. ثبّت التطبيق وافتحه، ثم اسمح بإذن **الأجهزة القريبة** والإشعارات.
-2. اقترن بالسيارة من إعدادات Bluetooth في الهاتف.
-3. اضغط **تحديث الأجهزة المقترنة** واختر اسم بلوتوث السيارة.
-4. اختر الأغاني من الهاتف، ثم اضغط **ابدأ المراقبة التلقائية**.
-5. سيظهر إشعار دائم أثناء انتظار السيارة. عند اتصال السيارة المختارة يبدأ تشغيل القائمة؛ وتستطيع التحكم من الإشعار أو أزرار السيارة.
+- English dark interface with the official Peugeot emblem and app icon.
+- Add multiple songs, remove tracks, and move tracks up or down in the playlist.
+- Play, pause, previous, next, and a seek bar with elapsed and total time.
+- Shuffle and repeat modes (off, all tracks, or one track).
+- Two-second audio crossfade between tracks, including manual previous/next.
+- Foreground playback notification with previous, play/pause, and next controls.
+- Automatic playback when the selected car connects.
 
-يمكنك تجربة القائمة يدوياً بواسطة **تشغيل الأغاني الآن**. لإيقاف الخدمة اضغط **إيقاف المراقبة والتشغيل**.
+## Use
 
-## بناء APK
+1. Open the app and grant Nearby devices and notification permissions.
+2. Pair the car in Android Bluetooth settings. If Bluetooth is off, approve Android's system prompt to turn it on.
+3. Refresh paired devices and select the car.
+4. Add audio files, then press **Start auto-play**. The new songs append to the playlist; use the arrows to reorder them.
+5. Playback starts when the selected car connects. **Play playlist now** starts it manually.
 
-### Android Studio
+Android 13 and later do not allow ordinary apps targeting API 33+ to toggle Bluetooth directly. If the car disconnects for 60 seconds, the app offers a notification shortcut to Bluetooth settings; turn Bluetooth off there yourself.
 
-افتح مجلد المشروع في Android Studio، وانتظر مزامنة Gradle، ثم اختر **Build > Build APK(s)**. يحتاج البناء إلى Android SDK 36 وJDK 17. ملف APK التجريبي يظهر في `app/build/outputs/apk/debug/app-debug.apk`.
+## Build APK
 
-### GitHub Actions
+Open this folder in Android Studio and wait for Gradle sync, then choose **Build > Build APK(s)**. The project needs Android SDK 36 and JDK 17. The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
-ارفع محتويات هذا المجلد إلى مستودع GitHub. سير العمل يبني APK تجريبياً عند كل `push`، ويمكن تنزيله من **Actions > Build CarMusic APK > Artifacts > CarMusic-debug-apk**.
+GitHub Actions also builds the debug APK on every push to `main` or `master`. Download it from **Actions > Build CarMusic APK > Artifacts > CarMusic-debug-apk**.
 
-## ملاحظات Android
+## Android notes
 
-- اختر السيارة وفعّل المراقبة بينما التطبيق مفتوح؛ تبقى الخدمة في المقدمة بإشعار أثناء الانتظار حتى يتمكن Android من استقبال اتصال Bluetooth وتشغيل الصوت في الخلفية.
-- بعد إعادة تشغيل الهاتف، افتح التطبيق وابدأ المراقبة مرة أخرى.
-- إذا أوقف الهاتف الخدمة بسبب توفير البطارية، اسمح للتطبيق بالعمل في الخلفية من إعدادات البطارية.
-- الأغاني تُختار عبر منتقي ملفات Android؛ لا يطلب التطبيق إذن قراءة مكتبة الموسيقى كاملة.
+- Start monitoring while the app is open. Android keeps the foreground service visible with a notification while it waits for the car.
+- After restarting the phone, open the app and start monitoring again.
+- Battery management on some phones may stop background services; allow the app to run unrestricted if that happens.
+- Music is selected using Android's file picker; the app does not request access to the entire music library.
+
+## Peugeot emblem
+
+The emblem image in the app resources is sourced from [Stellantis Japan's official Peugeot brand announcement](https://www.stellantis.jp/news/20210225_peugeot_new_ci).

@@ -538,4 +538,3 @@ class CarMusicService : Service() {
         private const val PROGRESS_TICK_MS = 500L
     }
 }
-
