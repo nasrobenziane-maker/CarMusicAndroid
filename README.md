@@ -8,7 +8,7 @@ An Android app that plays a local playlist when the phone connects to the paired
 - Add multiple songs, remove tracks, and move tracks up or down in the playlist.
 - Play, pause, previous, next, and a seek bar with elapsed and total time.
 - Shuffle and repeat modes (off, all tracks, or one track).
-- Two-second audio crossfade between tracks, including manual previous/next.
+- Five-second audio crossfade between tracks, including manual previous/next. Playlist rows show song names, reorder by long-press and drag, and remove a song with a left swipe.
 - Foreground playback notification with previous, play/pause, and next controls.
 - Automatic playback when the selected car connects.
 

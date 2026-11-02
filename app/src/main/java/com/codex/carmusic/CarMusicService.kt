@@ -180,10 +180,10 @@ class CarMusicService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun createPlayer(): ExoPlayer = ExoPlayer.Builder(this)
+    private fun createPlayer(handleAudioFocus: Boolean = true): ExoPlayer = ExoPlayer.Builder(this)
         .setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), handleAudioFocus
         )
         .build()
 
@@ -324,7 +324,12 @@ class CarMusicService : Service() {
             player.pause()
             updatePlaybackState()
             sendPlaybackState()
-        } else transitionTo(index)
+        } else if (isCrossfading && secondaryPlayer != null) {
+            completeCrossfade()
+        } else {
+            // ExoPlayer reports isPlaying=false at STATE_ENDED; keep playback moving.
+            loadTrack(index, play = true)
+        }
     }
 
     private fun transitionTo(index: Int) {
@@ -339,7 +344,7 @@ class CarMusicService : Service() {
 
     private fun beginCrossfade(index: Int) {
         if (isCrossfading || index !in songUris.indices) return
-        val incoming = createPlayer()
+        val incoming = createPlayer(handleAudioFocus = false)
         secondaryPlayer = incoming
         pendingCrossfadeIndex = index
         incoming.volume = 0f
@@ -532,7 +537,7 @@ class CarMusicService : Service() {
         private const val CHANNEL_ID = "car_music_monitor"
         private const val NOTIFICATION_ID = 7041
         private const val BLUETOOTH_OFF_DELAY_MS = 60_000L
-        private const val CROSSFADE_MS = 2_000L
+        private const val CROSSFADE_MS = 5_000L
         private const val FADE_TICK_MS = 40L
         private const val CROSSFADE_CHECK_MS = 100L
         private const val PROGRESS_TICK_MS = 500L

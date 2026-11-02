@@ -10,6 +10,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.ClipData
+import android.view.DragEvent
+import android.view.MotionEvent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -301,38 +304,48 @@ class MainActivity : Activity() {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(6, 4, 0, 4)
+                setPadding(10, 12, 10, 12)
+                tag = index
+                isClickable = true
+                setBackgroundResource(R.drawable.playlist_row_background)
             }
             val title = TextView(this).apply {
-                text = "${index + 1}.  ${displayName(uri)}"
-                setTextColor(if (index == currentIndex) 0xFF54B9FF.toInt() else 0xFFF2F5FA.toInt())
-                textSize = 14f
+                text = displayName(uri)
+                setTextColor(if (index == currentIndex) 0xFF72C7FF.toInt() else 0xFFF2F5FA.toInt())
+                textSize = 15f
                 maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
+                ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
-            val up = Button(this).apply {
-                text = "↑"
-                minWidth = 40
-                isEnabled = index > 0
-                setOnClickListener { moveSong(index, index - 1) }
-            }
-            val down = Button(this).apply {
-                text = "↓"
-                minWidth = 40
-                isEnabled = index < uris.lastIndex
-                setOnClickListener { moveSong(index, index + 1) }
-            }
-            val remove = Button(this).apply {
-                text = "×"
-                minWidth = 40
-                setOnClickListener { removeSong(index) }
-            }
             row.addView(title)
-            row.addView(up)
-            row.addView(down)
-            row.addView(remove)
             row.setOnClickListener { sendPlayerAction(ServiceActions.SELECT_TRACK, mapOf(ServiceActions.EXTRA_INDEX to index)) }
+            row.setOnLongClickListener {
+                val clip = ClipData.newPlainText("playlist-index", index.toString())
+                row.startDragAndDrop(clip, View.DragShadowBuilder(row), index, 0)
+            }
+            var downX = 0f
+            row.setOnTouchListener { view, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> { downX = event.rawX; false }
+                    MotionEvent.ACTION_UP -> {
+                        val delta = event.rawX - downX
+                        if (delta < -72f * resources.displayMetrics.density) { removeSong(index); true } else false
+                    }
+                    else -> false
+                }
+            }
+            row.setOnDragListener { view, event ->
+                when (event.action) {
+                    DragEvent.ACTION_DRAG_STARTED -> true
+                    DragEvent.ACTION_DROP -> {
+                        val from = event.localState as? Int ?: -1
+                        val to = view.tag as? Int ?: -1
+                        if (from >= 0 && to >= 0 && from != to) moveSong(from, to)
+                        true
+                    }
+                    else -> true
+                }
+            }
             playlistContainer.addView(row)
             if (index < uris.lastIndex) {
                 val divider = View(this).apply { setBackgroundColor(0xFF2A3544.toInt()) }
@@ -340,7 +353,6 @@ class MainActivity : Activity() {
             }
         }
     }
-
     private fun removeSong(index: Int) {
         val updated = selectedUris().toMutableList().also { if (index in it.indices) it.removeAt(index) }
         prefs.edit().putString(AppPrefs.KEY_SONG_URIS, updated.joinToString("\n"))

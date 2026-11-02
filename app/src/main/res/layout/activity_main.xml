@@ -239,7 +239,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center"
-                    android:text="2-second crossfade between tracks"
+                    android:text="5-second crossfade between tracks"
                     android:textColor="#7991AA"
                     android:textSize="12sp" />
             </LinearLayout>
@@ -293,7 +293,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:backgroundTint="#263B50"
+                android:backgroundTint="#54B9FF"
                 android:text="Play playlist now"
                 android:textColor="#FFFFFF" />
 
