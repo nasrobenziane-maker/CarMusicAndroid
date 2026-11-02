@@ -2,8 +2,10 @@ package com.codex.carmusic
 
 import android.Manifest
 import android.app.Activity
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -23,6 +25,7 @@ class MainActivity : Activity() {
     private lateinit var songsText: TextView
     private lateinit var statusText: TextView
     private lateinit var pairedDevices: List<BluetoothDevice>
+    private var enablePromptRequested = false
     private val prefs by lazy { getSharedPreferences(AppPrefs.FILE, MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -48,7 +51,10 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (hasBluetoothPermission()) refreshPairedDevices()
+        if (hasBluetoothPermission()) {
+            refreshPairedDevices()
+            requestBluetoothEnableIfNeeded()
+        }
         showSavedStatus()
     }
 
@@ -72,10 +78,31 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_PERMISSIONS) {
-            if (hasBluetoothPermission()) refreshPairedDevices()
+            if (hasBluetoothPermission()) {
+                refreshPairedDevices()
+                requestBluetoothEnableIfNeeded()
+            }
             if (!hasBluetoothPermission()) {
                 statusText.text = "الحالة: يلزم السماح بالوصول إلى الأجهزة القريبة لاختيار السيارة."
             }
+        }
+    }
+
+    private fun requestBluetoothEnableIfNeeded() {
+        if (enablePromptRequested || !hasBluetoothPermission()) return
+        val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter ?: return
+        try {
+            if (!adapter.isEnabled) {
+                enablePromptRequested = true
+                startActivityForResult(
+                    Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE),
+                    REQUEST_ENABLE_BLUETOOTH
+                )
+            }
+        } catch (_: SecurityException) {
+            statusText.text = "الحالة: اسمح بإذن الأجهزة القريبة لتشغيل Bluetooth."
+        } catch (_: ActivityNotFoundException) {
+            statusText.text = "الحالة: شغّل Bluetooth من إعدادات الهاتف."
         }
     }
 
@@ -139,6 +166,15 @@ class MainActivity : Activity() {
     @Deprecated("Uses the system document picker for Android compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_ENABLE_BLUETOOTH) {
+            if (resultCode == RESULT_OK) {
+                refreshPairedDevices()
+                toast("تم تشغيل Bluetooth.")
+            } else {
+                statusText.text = "الحالة: وافق على طلب النظام لتشغيل Bluetooth."
+            }
+            return
+        }
         if (requestCode != REQUEST_SONGS || resultCode != RESULT_OK || data == null) return
 
         val selected = mutableListOf<Uri>()
@@ -259,5 +295,7 @@ class MainActivity : Activity() {
     companion object {
         private const val REQUEST_PERMISSIONS = 100
         private const val REQUEST_SONGS = 101
+        private const val REQUEST_ENABLE_BLUETOOTH = 102
     }
 }
+
