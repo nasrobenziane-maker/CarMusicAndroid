@@ -1,0 +1,31 @@
+name: Build Android APK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: تنزيل ملفات المشروع
+        uses: actions/checkout@v4
+
+      - name: إعداد Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: إعداد Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: بناء APK
+        run: chmod +x gradlew && ./gradlew assembleDebug
+
+      - name: رفع APK كملف قابل للتنزيل
+        uses: actions/upload-artifact@v4
+        with:
+          name: CarMusic-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
