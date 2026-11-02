@@ -1,114 +1,307 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F5F7F6"
-    android:fillViewport="true">
+    android:background="#07090D">
 
-    <LinearLayout
+    <ImageView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layoutDirection="rtl"
-        android:orientation="vertical"
-        android:padding="24dp">
+        android:layout_height="match_parent"
+        android:alpha="0.12"
+        android:contentDescription="Peugeot lion background"
+        android:scaleType="centerCrop"
+        android:src="@drawable/peugeot_brand_reference" />
 
-        <TextView
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true">
+
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="موسيقى السيارة"
-            android:textColor="#16352E"
-            android:textSize="28sp"
-            android:textStyle="bold" />
+            android:orientation="vertical"
+            android:padding="18dp">
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="اختر السيارة المقترنة والأغاني المحلية. يبدأ التشغيل تلقائياً عند اتصال السيارة المختارة فقط."
-            android:textColor="#4E625C"
-            android:textSize="16sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/permissionsButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="السماح بالبلوتوث والإشعارات" />
+                <ImageView
+                    android:layout_width="76dp"
+                    android:layout_height="76dp"
+                    android:contentDescription="Official Peugeot emblem"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/peugeot_emblem" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="جهاز السيارة المقترن"
-            android:textColor="#16352E"
-            android:textSize="18sp"
-            android:textStyle="bold" />
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="14dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
 
-        <Spinner
-            android:id="@+id/deviceSpinner"
-            android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:layout_marginTop="8dp"
-            android:contentDescription="اختر اسم بلوتوث السيارة" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="PEUGEOT CAR MUSIC"
+                        android:textColor="#F2F5FA"
+                        android:textSize="22sp"
+                        android:textStyle="bold" />
 
-        <Button
-            android:id="@+id/refreshDevicesButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="تحديث الأجهزة المقترنة" />
+                    <TextView
+                        android:id="@+id/statusText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="5dp"
+                        android:text="Status: Stopped"
+                        android:textColor="#A9B7C9"
+                        android:textSize="14sp" />
+                </LinearLayout>
+            </LinearLayout>
 
-        <TextView
-            android:id="@+id/songsText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="لم تختر أغاني بعد"
-            android:textColor="#4E625C"
-            android:textSize="15sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:background="@drawable/panel_background"
+                android:orientation="vertical"
+                android:padding="16dp">
 
-        <Button
-            android:id="@+id/pickSongsButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="اختيار الأغاني من الهاتف" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="CAR CONNECTION"
+                    android:textColor="#D7E4F4"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
 
-        <Button
-            android:id="@+id/startButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:backgroundTint="#146C5B"
-            android:text="ابدأ المراقبة التلقائية"
-            android:textColor="#FFFFFF" />
+                <Spinner
+                    android:id="@+id/deviceSpinner"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="8dp"
+                    android:contentDescription="Select paired car Bluetooth" />
 
-        <Button
-            android:id="@+id/playNowButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="تشغيل الأغاني الآن" />
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/stopButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="إيقاف المراقبة والتشغيل" />
+                    <Button
+                        android:id="@+id/permissionsButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Permissions" />
 
-        <TextView
-            android:id="@+id/statusText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:padding="12dp"
-            android:text="الحالة: متوقف"
-            android:textColor="#16352E"
-            android:textSize="15sp" />
+                    <Button
+                        android:id="@+id/refreshDevicesButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:text="Refresh devices" />
+                </LinearLayout>
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="اترك خدمة المراقبة مفعّلة. بعد إعادة تشغيل الهاتف، افتح التطبيق وابدأ المراقبة مجدداً."
-            android:textColor="#6A7772"
-            android:textSize="13sp" />
-    </LinearLayout>
-</ScrollView>
+                <Button
+                    android:id="@+id/startButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:backgroundTint="#1477C9"
+                    android:text="Start auto-play"
+                    android:textColor="#FFFFFF" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/panel_background"
+                android:orientation="vertical"
+                android:padding="18dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="NOW PLAYING"
+                    android:textColor="#54B9FF"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/currentSongText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="Choose songs to build your playlist"
+                    android:textColor="#FFFFFF"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/currentArtistText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Peugeot Car Music"
+                    android:textColor="#A9B7C9"
+                    android:textSize="14sp" />
+
+                <SeekBar
+                    android:id="@+id/songSeekBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:max="1000"
+                    android:progressTint="#54B9FF"
+                    android:thumbTint="#E8F4FF" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/elapsedText"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="0:00"
+                        android:textColor="#A9B7C9" />
+
+                    <TextView
+                        android:id="@+id/durationText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0:00"
+                        android:textColor="#A9B7C9" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/previousButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="|◀"
+                        android:textColor="#FFFFFF" />
+
+                    <Button
+                        android:id="@+id/playPauseButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginHorizontal="12dp"
+                        android:backgroundTint="#1477C9"
+                        android:text="Play"
+                        android:textColor="#FFFFFF" />
+
+                    <Button
+                        android:id="@+id/nextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="▶|"
+                        android:textColor="#FFFFFF" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/shuffleButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Shuffle: Off" />
+
+                    <Button
+                        android:id="@+id/repeatButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:text="Repeat: Off" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="2-second crossfade between tracks"
+                    android:textColor="#7991AA"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/panel_background"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="PLAYLIST"
+                    android:textColor="#D7E4F4"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/pickSongsButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Add songs" />
+
+                    <Button
+                        android:id="@+id/clearPlaylistButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="Clear" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/playlistContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/playNowButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:backgroundTint="#263B50"
+                android:text="Play playlist now"
+                android:textColor="#FFFFFF" />
+
+            <Button
+                android:id="@+id/stopButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Stop monitoring" />
+        </LinearLayout>
+    </ScrollView>
+</FrameLayout>
