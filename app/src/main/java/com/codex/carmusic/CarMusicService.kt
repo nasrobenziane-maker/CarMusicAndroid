@@ -98,9 +98,11 @@ class CarMusicService : Service() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
                 if (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR) == BluetoothAdapter.STATE_OFF) {
+                    carConnected = false
                     handler.removeCallbacks(disconnectTimeoutRunnable)
                     disconnectTimerPending = false
                     disconnectTimeoutPassed = false
+                    pausePlayback()
                     updateNotification("Bluetooth was turned off manually.")
                 }
                 return
@@ -536,3 +538,4 @@ class CarMusicService : Service() {
         private const val PROGRESS_TICK_MS = 500L
     }
 }
+
