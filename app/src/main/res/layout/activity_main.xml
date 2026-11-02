@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F5F7F6"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layoutDirection="rtl"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="موسيقى السيارة"
+            android:textColor="#16352E"
+            android:textSize="28sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="اختر السيارة المقترنة والأغاني المحلية. يبدأ التشغيل تلقائياً عند اتصال السيارة المختارة فقط."
+            android:textColor="#4E625C"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/permissionsButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="السماح بالبلوتوث والإشعارات" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="جهاز السيارة المقترن"
+            android:textColor="#16352E"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <Spinner
+            android:id="@+id/deviceSpinner"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="8dp"
+            android:contentDescription="اختر اسم بلوتوث السيارة" />
+
+        <Button
+            android:id="@+id/refreshDevicesButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="تحديث الأجهزة المقترنة" />
+
+        <TextView
+            android:id="@+id/songsText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="لم تختر أغاني بعد"
+            android:textColor="#4E625C"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/pickSongsButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="اختيار الأغاني من الهاتف" />
+
+        <Button
+            android:id="@+id/startButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:backgroundTint="#146C5B"
+            android:text="ابدأ المراقبة التلقائية"
+            android:textColor="#FFFFFF" />
+
+        <Button
+            android:id="@+id/playNowButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="تشغيل الأغاني الآن" />
+
+        <Button
+            android:id="@+id/stopButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="إيقاف المراقبة والتشغيل" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:padding="12dp"
+            android:text="الحالة: متوقف"
+            android:textColor="#16352E"
+            android:textSize="15sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="اترك خدمة المراقبة مفعّلة. بعد إعادة تشغيل الهاتف، افتح التطبيق وابدأ المراقبة مجدداً."
+            android:textColor="#6A7772"
+            android:textSize="13sp" />
+    </LinearLayout>
+</ScrollView>
