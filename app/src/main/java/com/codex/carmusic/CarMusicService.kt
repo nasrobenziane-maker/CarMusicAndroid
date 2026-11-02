@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -17,7 +18,10 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.provider.Settings
 import androidx.media3.common.MediaItem
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -34,25 +38,53 @@ class CarMusicService : Service() {
     private var targetName: String = "السيارة"
     private var songUris: List<Uri> = emptyList()
     private var carConnected = false
+    private var disconnectTimeoutPassed = false
+    private var disconnectTimerPending = false
+    private val timeoutHandler = Handler(Looper.getMainLooper())
+    private val disconnectTimeoutRunnable = Runnable {
+        disconnectTimerPending = false
+        if (!carConnected) {
+            disconnectTimeoutPassed = true
+            updateNotification()
+        }
+    }
 
     private val carReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                if (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR) == BluetoothAdapter.STATE_OFF) {
+                    timeoutHandler.removeCallbacks(disconnectTimeoutRunnable)
+                    disconnectTimerPending = false
+                    disconnectTimeoutPassed = false
+                    updateNotification("أوقفت Bluetooth يدوياً.")
+                }
+                return
+            }
             val device = getBluetoothDevice(intent) ?: return
             val address = try { device.address } catch (_: SecurityException) { return }
             if (address != targetAddress || targetAddress.isBlank()) return
 
             when (intent.action) {
                 BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                    timeoutHandler.removeCallbacks(disconnectTimeoutRunnable)
+                    disconnectTimerPending = false
+                    disconnectTimeoutPassed = false
                     if (!carConnected) {
                         carConnected = true
                         playPlaylist()
                     }
                 }
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
-                    carConnected = false
-                    player.pause()
-                    promoteForeground(isPlaying = false)
-                    updateNotification()
+                    if (carConnected) {
+                        carConnected = false
+                        disconnectTimeoutPassed = false
+                        player.pause()
+                        promoteForeground(isPlaying = false)
+                        timeoutHandler.removeCallbacks(disconnectTimeoutRunnable)
+                        disconnectTimerPending = true
+                        timeoutHandler.postDelayed(disconnectTimeoutRunnable, BLUETOOTH_OFF_DELAY_MS)
+                        updateNotification()
+                    }
                 }
             }
         }
@@ -124,6 +156,7 @@ class CarMusicService : Service() {
         val filter = IntentFilter().apply {
             addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
             addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
         }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -236,10 +269,11 @@ class CarMusicService : Service() {
 
     private fun buildNotification(message: String? = null): Notification {
         val title = if (playerOrNullIsPlaying()) "يُشغّل الآن" else "مراقبة اتصال السيارة"
-        val text = message ?: if (playerOrNullIsPlaying()) {
-            player.currentMediaItem?.mediaMetadata?.title?.toString() ?: targetName
-        } else {
-            "بانتظار اتصال ${targetName.ifBlank { "السيارة" }}"
+        val text = message ?: when {
+            playerOrNullIsPlaying() -> player.currentMediaItem?.mediaMetadata?.title?.toString() ?: targetName
+            disconnectTimeoutPassed -> "انقطع اتصال السيارة منذ 60 ثانية. افتح إعدادات Bluetooth لإيقافه يدوياً."
+            !carConnected && disconnectTimerPending -> "انقطع اتصال السيارة. سيظهر تذكير بعد 60 ثانية."
+            else -> "بانتظار اتصال ${targetName.ifBlank { "السيارة" }}"
         }
         val openApp = PendingIntent.getActivity(
             this, 1, Intent(this, MainActivity::class.java),
@@ -264,6 +298,22 @@ class CarMusicService : Service() {
             .setOngoing(true)
             .addAction(android.app.Notification.Action.Builder(playIcon, playLabel, servicePendingIntent(playAction)).build())
             .addAction(android.app.Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "إيقاف", servicePendingIntent(ServiceActions.STOP)).build())
+            .apply {
+                if (disconnectTimeoutPassed && !carConnected) {
+                    addAction(
+                        android.app.Notification.Action.Builder(
+                            android.R.drawable.ic_menu_preferences,
+                            "إعدادات Bluetooth",
+                            PendingIntent.getActivity(
+                                this@CarMusicService,
+                                12,
+                                Intent(Settings.ACTION_BLUETOOTH_SETTINGS),
+                                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                            )
+                        ).build()
+                    )
+                }
+            }
             .build()
     }
 
@@ -286,6 +336,7 @@ class CarMusicService : Service() {
 
     @Suppress("DEPRECATION")
     override fun onDestroy() {
+        timeoutHandler.removeCallbacks(disconnectTimeoutRunnable)
         if (receiverRegistered) {
             try { unregisterReceiver(carReceiver) } catch (_: IllegalArgumentException) { }
             receiverRegistered = false
@@ -305,5 +356,7 @@ class CarMusicService : Service() {
     companion object {
         private const val CHANNEL_ID = "car_music_monitor"
         private const val NOTIFICATION_ID = 7041
+        private const val BLUETOOTH_OFF_DELAY_MS = 60_000L
     }
 }
+
