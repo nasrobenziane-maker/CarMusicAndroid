@@ -7,7 +7,10 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothA2dp
+import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -50,6 +53,9 @@ class CarMusicService : Service() {
     private var pendingCrossfadeIndex = -1
     private var crossfadeStartedAt = 0L
     private var crossfadeDurationMs = CROSSFADE_MS
+    private var lastCheckpointUri = ""
+    private var lastCheckpointPositionMs = -1L
+    private var profileCheckPending = false
     private val handler = Handler(Looper.getMainLooper())
 
     private val disconnectTimeoutRunnable = Runnable {
@@ -74,6 +80,7 @@ class CarMusicService : Service() {
 
     private val progressRunnable = object : Runnable {
         override fun run() {
+            persistPlaybackCheckpoint()
             sendPlaybackState()
             handler.postDelayed(this, PROGRESS_TICK_MS)
         }
@@ -82,7 +89,7 @@ class CarMusicService : Service() {
     private val crossfadeWatchRunnable = object : Runnable {
         override fun run() {
             if (::player.isInitialized && player.isPlaying && !isCrossfading && songUris.size > 1 &&
-                player.duration > 0L && player.duration != C.TIME_UNSET
+                secondaryPlayer == null && player.duration > 0L && player.duration != C.TIME_UNSET
             ) {
                 val remaining = player.duration - player.currentPosition
                 if (remaining in 1..CROSSFADE_MS) {
@@ -92,6 +99,23 @@ class CarMusicService : Service() {
             }
             handler.postDelayed(this, CROSSFADE_CHECK_MS)
         }
+    }
+
+    private val a2dpListener = object : BluetoothProfile.ServiceListener {
+        override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+            profileCheckPending = false
+            if (profile == BluetoothProfile.A2DP) {
+                try {
+                    if (proxy.connectedDevices.any { it.address == targetAddress }) {
+                        carConnected = true
+                        startPlaylist()
+                    }
+                } catch (_: SecurityException) { }
+                (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter?.closeProfileProxy(profile, proxy)
+            }
+        }
+
+        override fun onServiceDisconnected(profile: Int) { profileCheckPending = false }
     }
 
     private val carReceiver = object : BroadcastReceiver() {
@@ -154,6 +178,7 @@ class CarMusicService : Service() {
         }
         loadSavedSettings()
         registerCarReceiver()
+        if (action == ServiceActions.START) checkAlreadyConnectedCar()
         promoteForeground(isPlaying = player.isPlaying)
 
         when (action) {
@@ -205,7 +230,15 @@ class CarMusicService : Service() {
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (target === secondaryPlayer && playbackState == Player.STATE_READY) startCrossfadeWhenReady(target)
-                if (target === player && playbackState == Player.STATE_ENDED && !isCrossfading) advanceAutomatically()
+                if (target === player && playbackState == Player.STATE_ENDED) {
+                    val incoming = secondaryPlayer
+                    if (isCrossfading && incoming != null && incoming.playbackState == Player.STATE_READY) {
+                        completeCrossfade()
+                    } else {
+                        cancelCrossfade()
+                        advanceAutomatically()
+                    }
+                }
                 if (target === player) sendPlaybackState()
             }
         })
@@ -221,6 +254,10 @@ class CarMusicService : Service() {
             .split('\n').let { stored ->
                 songUris.indices.map { index -> stored.getOrNull(index).orEmpty().ifBlank { "Track ${index + 1}" } }
             }
+        val savedTrackUri = prefs.getString(AppPrefs.KEY_LAST_TRACK_URI, null)
+        if (currentIndex !in songUris.indices && savedTrackUri != null) {
+            currentIndex = songUris.indexOfFirst { it.toString() == savedTrackUri }
+        }
         shuffleEnabled = prefs.getBoolean(AppPrefs.KEY_SHUFFLE, false)
         repeatMode = prefs.getInt(AppPrefs.KEY_REPEAT_MODE, 0).coerceIn(0, 2)
     }
@@ -244,6 +281,12 @@ class CarMusicService : Service() {
             loadTrack(currentIndex, play = false)
         }
         sendPlaybackState()
+    }
+
+    private fun checkAlreadyConnectedCar() {
+        if (profileCheckPending || targetAddress.isBlank() || !hasBluetoothPermission()) return
+        val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter ?: return
+        profileCheckPending = try { adapter.getProfileProxy(this, a2dpListener, BluetoothProfile.A2DP) } catch (_: SecurityException) { false }
     }
 
     private fun registerCarReceiver() {
@@ -276,20 +319,30 @@ class CarMusicService : Service() {
         if (songUris.isEmpty()) { updateNotification("Add songs to the playlist first."); return }
         if (targetAddress.isBlank()) { updateNotification("Choose your paired car in the app first."); return }
         if (currentIndex !in songUris.indices) currentIndex = 0
-        loadTrack(currentIndex, play = true)
+        val selectedUri = songUris[currentIndex]
+        val currentUri = player.currentMediaItem?.localConfiguration?.uri
+        if (player.mediaItemCount > 0 && currentUri == selectedUri) {
+            player.play()
+            return
+        }
+        val prefs = getSharedPreferences(AppPrefs.FILE, MODE_PRIVATE)
+        val savedUri = prefs.getString(AppPrefs.KEY_LAST_TRACK_URI, null)
+        val resumeAt = if (savedUri == selectedUri.toString()) prefs.getLong(AppPrefs.KEY_LAST_POSITION_MS, 0L) else 0L
+        loadTrack(currentIndex, play = true, startPositionMs = resumeAt)
     }
 
-    private fun loadTrack(index: Int, play: Boolean) {
+    private fun loadTrack(index: Int, play: Boolean, startPositionMs: Long = 0L) {
         if (index !in songUris.indices) return
         cancelCrossfade()
         currentIndex = index
         player.volume = 1f
-        player.setMediaItem(mediaItem(index))
+        player.setMediaItem(mediaItem(index), startPositionMs.coerceAtLeast(0L))
         player.prepare()
         player.playWhenReady = play
         if (play) player.play()
         updateMediaMetadata(player.currentMediaItem)
         updatePlaybackState()
+        savePlaybackCheckpoint(songUris[index].toString(), startPositionMs)
         sendPlaybackState()
     }
 
@@ -324,10 +377,7 @@ class CarMusicService : Service() {
             player.pause()
             updatePlaybackState()
             sendPlaybackState()
-        } else if (isCrossfading && secondaryPlayer != null) {
-            completeCrossfade()
         } else {
-            // ExoPlayer reports isPlaying=false at STATE_ENDED; keep playback moving.
             loadTrack(index, play = true)
         }
     }
@@ -358,7 +408,9 @@ class CarMusicService : Service() {
         isCrossfading = true
         incoming.volume = 0f
         incoming.play()
-        crossfadeDurationMs = CROSSFADE_MS
+        val remainingMs = if (player.duration > 0L && player.duration != C.TIME_UNSET)
+            (player.duration - player.currentPosition).coerceAtLeast(1L) else CROSSFADE_MS
+        crossfadeDurationMs = minOf(CROSSFADE_MS, remainingMs)
         crossfadeStartedAt = SystemClock.elapsedRealtime()
         handler.removeCallbacks(crossfadeRunnable)
         handler.post(crossfadeRunnable)
@@ -375,6 +427,7 @@ class CarMusicService : Service() {
         pendingCrossfadeIndex = -1
         isCrossfading = false
         outgoing.release()
+        persistPlaybackCheckpoint(force = true)
         updateMediaMetadata(player.currentMediaItem)
         updatePlaybackState()
         updateNotification()
@@ -391,10 +444,28 @@ class CarMusicService : Service() {
     }
 
     private fun pausePlayback() {
+        persistPlaybackCheckpoint(force = true)
         cancelCrossfade()
         if (::player.isInitialized) player.pause()
         updatePlaybackState()
         sendPlaybackState()
+    }
+
+    private fun savePlaybackCheckpoint(uri: String, position: Long) {
+        getSharedPreferences(AppPrefs.FILE, MODE_PRIVATE).edit()
+            .putString(AppPrefs.KEY_LAST_TRACK_URI, uri)
+            .putLong(AppPrefs.KEY_LAST_POSITION_MS, position.coerceAtLeast(0L))
+            .apply()
+        lastCheckpointUri = uri
+        lastCheckpointPositionMs = position.coerceAtLeast(0L)
+    }
+
+    private fun persistPlaybackCheckpoint(force: Boolean = false) {
+        if (!::player.isInitialized || player.mediaItemCount == 0 || currentIndex !in songUris.indices) return
+        val uri = player.currentMediaItem?.localConfiguration?.uri?.toString() ?: songUris[currentIndex].toString()
+        val position = player.currentPosition.coerceAtLeast(0L)
+        if (!force && uri == lastCheckpointUri && kotlin.math.abs(position - lastCheckpointPositionMs) < CHECKPOINT_INTERVAL_MS) return
+        savePlaybackCheckpoint(uri, position)
     }
 
     private fun resumePlayback() {
@@ -538,6 +609,7 @@ class CarMusicService : Service() {
         private const val NOTIFICATION_ID = 7041
         private const val BLUETOOTH_OFF_DELAY_MS = 60_000L
         private const val CROSSFADE_MS = 5_000L
+        private const val CHECKPOINT_INTERVAL_MS = 3_000L
         private const val FADE_TICK_MS = 40L
         private const val CROSSFADE_CHECK_MS = 100L
         private const val PROGRESS_TICK_MS = 500L

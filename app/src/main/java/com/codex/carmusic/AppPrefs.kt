@@ -9,6 +9,8 @@ internal object AppPrefs {
     const val KEY_MONITORING = "monitoring"
     const val KEY_SHUFFLE = "shuffle"
     const val KEY_REPEAT_MODE = "repeat_mode"
+    const val KEY_LAST_TRACK_URI = "last_track_uri"
+    const val KEY_LAST_POSITION_MS = "last_position_ms"
 }
 
 internal object ServiceActions {

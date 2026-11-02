@@ -22,6 +22,8 @@ import android.view.Gravity
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.Spinner
@@ -301,38 +303,43 @@ class MainActivity : Activity() {
             return
         }
         uris.forEachIndexed { index, uri ->
+            val frame = FrameLayout(this).apply {
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58))
+                setPadding(0, dp(2), 0, dp(2))
+            }
+            val deleteButton = ImageButton(this).apply {
+                setImageResource(android.R.drawable.ic_menu_delete)
+                imageTintList = android.content.res.ColorStateList.valueOf(0xFFFFFFFF.toInt())
+                backgroundTintList = android.content.res.ColorStateList.valueOf(0xFFE53935.toInt())
+                contentDescription = "Delete ${displayName(uri)}"
+                visibility = View.INVISIBLE
+                layoutParams = FrameLayout.LayoutParams(dp(58), FrameLayout.LayoutParams.MATCH_PARENT, Gravity.END)
+                setOnClickListener { removeSong(index) }
+            }
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(10, 12, 10, 12)
+                setPadding(dp(12), 0, dp(10), 0)
                 tag = index
                 isClickable = true
+                isLongClickable = true
+                elevation = dp(2).toFloat()
                 setBackgroundResource(R.drawable.playlist_row_background)
             }
             val title = TextView(this).apply {
-                text = displayName(uri)
+                text = "${index + 1}.  ${displayName(uri)}"
                 setTextColor(if (index == currentIndex) 0xFF72C7FF.toInt() else 0xFFF2F5FA.toInt())
                 textSize = 15f
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+                gravity = Gravity.CENTER_VERTICAL
             }
             row.addView(title)
             row.setOnClickListener { sendPlayerAction(ServiceActions.SELECT_TRACK, mapOf(ServiceActions.EXTRA_INDEX to index)) }
             row.setOnLongClickListener {
                 val clip = ClipData.newPlainText("playlist-index", index.toString())
                 row.startDragAndDrop(clip, View.DragShadowBuilder(row), index, 0)
-            }
-            var downX = 0f
-            row.setOnTouchListener { view, event ->
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> { downX = event.rawX; false }
-                    MotionEvent.ACTION_UP -> {
-                        val delta = event.rawX - downX
-                        if (delta < -72f * resources.displayMetrics.density) { removeSong(index); true } else false
-                    }
-                    else -> false
-                }
             }
             row.setOnDragListener { view, event ->
                 when (event.action) {
@@ -346,13 +353,58 @@ class MainActivity : Activity() {
                     else -> true
                 }
             }
-            playlistContainer.addView(row)
+            var downX = 0f
+            var initialTranslation = 0f
+            var swiping = false
+            row.setOnTouchListener { _, event ->
+                val revealWidth = dp(58).toFloat()
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downX = event.rawX
+                        initialTranslation = row.translationX
+                        swiping = false
+                        false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = event.rawX - downX
+                        if (kotlin.math.abs(dx) > dp(10)) swiping = true
+                        if (swiping) {
+                            row.translationX = (initialTranslation + dx).coerceIn(-revealWidth, 0f)
+                            deleteButton.visibility = if (row.translationX < 0f) View.VISIBLE else View.INVISIBLE
+                            true
+                        } else false
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (!swiping) false else {
+                            val dx = event.rawX - downX
+                            val reveal = if (dx < -dp(24)) -revealWidth else 0f
+                            row.animate().translationX(reveal).setDuration(140).start()
+                            deleteButton.visibility = if (reveal < 0f) View.VISIBLE else View.INVISIBLE
+                            true
+                        }
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        if (swiping) {
+                            val reveal = if (row.translationX < -revealWidth / 2) -revealWidth else 0f
+                            row.animate().translationX(reveal).setDuration(140).start()
+                            deleteButton.visibility = if (reveal < 0f) View.VISIBLE else View.INVISIBLE
+                            true
+                        } else false
+                    }
+                    else -> false
+                }
+            }
+            frame.addView(deleteButton)
+            frame.addView(row, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            playlistContainer.addView(frame)
             if (index < uris.lastIndex) {
                 val divider = View(this).apply { setBackgroundColor(0xFF2A3544.toInt()) }
                 playlistContainer.addView(divider, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1))
             }
         }
     }
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
     private fun removeSong(index: Int) {
         val updated = selectedUris().toMutableList().also { if (index in it.indices) it.removeAt(index) }
         prefs.edit().putString(AppPrefs.KEY_SONG_URIS, updated.joinToString("\n"))
