@@ -1,38 +1,50 @@
 # Peugeot Car Music
 
-Android app that plays your local playlist automatically when the phone connects to your car over Bluetooth, and pauses it when the car disconnects.
+An Android app that plays a local playlist when the phone connects to the paired car selected in the app. The app matches the saved Bluetooth device address so another speaker or headset will not trigger playback. It plays local audio files selected by the user; it does not control Spotify or YouTube.
 
-## How it behaves
+## Features
 
-- **Start once:** open the app, grant permissions, choose the paired car, add songs and press **Start auto-play**. The app then watches for that exact Bluetooth device (by address); other speakers or headsets never trigger it.
-- **Car connects:** when the car's audio link comes up, the playlist starts by itself (retrying a few times if the car is not ready yet).
-- **Car disconnects:** playback pauses and the current song and position are saved.
-- **Car reconnects:** playback resumes from the same position.
-- The app is woken by Android when the car connects, even if its service was stopped. Pressing **Stop** ends monitoring.
-- Plays local audio files you pick; it does not control Spotify or YouTube.
+- English dark interface with the official Peugeot emblem and app icon.
+- Add multiple songs, remove tracks, and move tracks up or down in the playlist.
+- Play, pause, previous, next, and a seek bar with elapsed and total time.
+- Shuffle and repeat modes (off, all tracks, or one track).
+- Five-second audio crossfade between tracks, including manual previous/next. The next track is prepared and starts fading in during the final five seconds of the current track; playback also continues to the next track if the fade player is not ready in time. The current track and position are saved every few seconds and when playback pauses or the car disconnects; playback resumes from the saved position when the car reconnects. Starting auto-play also checks whether the selected car is already connected. Add songs supports multi-select. Playlist songs are numbered; swipe left to reveal the red delete button. Playlist rows show song names, reorder by long-press and drag, and remove a song with a left swipe.
+- Foreground playback notification with previous, play/pause, and next controls.
+- Automatic playback when the selected car connects.
 
-## Other features
+## Use
 
-- Add multiple songs, reorder (long-press and drag), delete (swipe left).
-- Play / pause, previous, next, seek bar, shuffle, repeat (off / all / one).
-- Five-second crossfade between tracks.
-- Notification controls (previous, play/pause, next).
-- **Event log** button: shows recent Bluetooth and playback events to diagnose problems.
+1. Open the app and grant Nearby devices and notification permissions.
+2. Pair the car in Android Bluetooth settings. If Bluetooth is off, approve Android's system prompt to turn it on.
+3. Refresh paired devices and select the car.
+4. Add audio files, then press **Start auto-play**. The new songs append to the playlist; use the arrows to reorder them.
+5. Playback starts when the selected car connects. **Play playlist now** starts it manually.
 
-## Keep it working on OPPO / ColorOS
+Android 13 and later do not allow ordinary apps targeting API 33+ to toggle Bluetooth directly. If the car disconnects for 60 seconds, the app offers a notification shortcut to Bluetooth settings; turn Bluetooth off there yourself.
 
-Press **Background setup** in the app and:
+## Build APK
 
-1. Allow the battery exemption (the app asks once when you press Start).
-2. Allow **Auto-launch** (Auto startup) for the app.
-3. Set battery usage to **Allow background activity**, and lock the app in the recent apps list.
+Open this folder in Android Studio and wait for Gradle sync, then choose **Build > Build APK(s)**. The project needs Android SDK 36 and JDK 17. The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
-After restarting the phone, open the app once and press **Start auto-play** again.
+GitHub Actions also builds the debug APK on every push to `main` or `master`. Download it from **Actions > Build CarMusic APK > Artifacts > CarMusic-debug-apk**.
 
-## Build
+## Android notes
 
-Open the folder in Android Studio (SDK 36, JDK 17) and run **Build > Build APK(s)**, or push to GitHub: the workflow builds `app-debug.apk` (Actions > Build CarMusic APK > Artifacts > CarMusic-debug-apk).
+- Start monitoring while the app is open. Android keeps the foreground service visible with a notification while it waits for the car.
+- After restarting the phone, open the app and start monitoring again.
+- Battery management on some phones may stop background services; allow the app to run unrestricted if that happens.
+- Music is selected using Android's file picker; the app does not request access to the entire music library.
 
-## Credits
+## Peugeot emblem
 
-The Peugeot emblem comes from [Stellantis Japan's brand announcement](https://www.stellantis.jp/news/20210225_peugeot_new_ci).
+The emblem image in the app resources is sourced from [Stellantis Japan's official Peugeot brand announcement](https://www.stellantis.jp/news/20210225_peugeot_new_ci).
+
+## Offline voice commands (version 1.3)
+
+- While the app is open, tap **Enable voice commands** and grant microphone permission. Android requires a visible, user-initiated start for reliable microphone foreground access on recent Android versions.
+- The app listens only while the selected car is connected and recognizes the fixed English phrases **car play**, **car stop**, and **car next**. Recognition is processed locally by Vosk; audio is not uploaded.
+- **car play** resumes the current track, **car stop** pauses and saves its position, and **car next** plays the next track.
+- A short vibration confirms a recognized command. Recognized phrases and confidence decisions appear in **Event log**.
+- Adjust the command confidence threshold if the cabin noise causes missed commands or accidental recognition.
+- Gradle downloads the Vosk small English model from the official Vosk model host and prepares it during Android Studio or GitHub Actions builds. The model is generated under `app/build` and is not committed to the repository.
+- The model requires substantial phone memory and voice accuracy depends on the car microphone routing, music volume, cabin noise, and accent. Test it in the actual car. Oppo/Realme battery settings can still stop background services.

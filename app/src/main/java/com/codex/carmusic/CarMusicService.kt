@@ -19,6 +19,10 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
+import android.media.AudioManager
+import android.media.MediaRecorder
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -32,6 +36,12 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import org.json.JSONObject
+import org.vosk.Model
+import org.vosk.Recognizer
+import org.vosk.android.RecognitionListener
+import org.vosk.android.SpeechService
+import org.vosk.android.StorageService
 
 class CarMusicService : Service() {
     private lateinit var player: ExoPlayer
@@ -56,7 +66,14 @@ class CarMusicService : Service() {
     private var lastCheckpointUri = ""
     private var lastCheckpointPositionMs = -1L
     private var profileCheckPending = false
-    private var autoPlayAttempts = 0
+    private var voiceEnabled = false
+    private var voiceModelLoading = false
+    private var voiceModel: Model? = null
+    private var voiceRecognizer: Recognizer? = null
+    private var speechService: SpeechService? = null
+    private var voiceConfidenceThreshold = DEFAULT_VOICE_CONFIDENCE
+    private var lastVoiceCommand = ""
+    private var lastVoiceCommandAtMs = 0L
     private val handler = Handler(Looper.getMainLooper())
 
     private val disconnectTimeoutRunnable = Runnable {
@@ -102,32 +119,17 @@ class CarMusicService : Service() {
         }
     }
 
-    private val autoPlayRunnable = object : Runnable {
-        override fun run() {
-            if (!carConnected) return
-            if (player.isPlaying) {
-                EventLog.add(this@CarMusicService, "Playing")
-                return
-            }
-            if (autoPlayAttempts >= AUTO_PLAY_MAX_ATTEMPTS) {
-                EventLog.add(this@CarMusicService, "Auto-play gave up after $autoPlayAttempts attempts")
-                return
-            }
-            autoPlayAttempts++
-            EventLog.add(this@CarMusicService, "Auto-play attempt $autoPlayAttempts")
-            startPlaylist()
-            handler.postDelayed(this, AUTO_PLAY_RETRY_MS)
-        }
-    }
-
-    private val aclCheckRunnable = Runnable { checkAlreadyConnectedCar() }
-
     private val a2dpListener = object : BluetoothProfile.ServiceListener {
         override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
             profileCheckPending = false
             if (profile == BluetoothProfile.A2DP) {
                 try {
-                    if (proxy.connectedDevices.any { it.address == targetAddress }) onCarAudioConnected()
+                    if (proxy.connectedDevices.any { it.address == targetAddress }) {
+                        carConnected = true
+                        logEvent("Selected car is already connected.")
+                        startPlaylist()
+                        startVoiceRecognitionIfReady()
+                    }
                 } catch (_: SecurityException) { }
                 (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter?.closeProfileProxy(profile, proxy)
             }
@@ -141,6 +143,8 @@ class CarMusicService : Service() {
             if (intent.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
                 if (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR) == BluetoothAdapter.STATE_OFF) {
                     carConnected = false
+                    logEvent("Bluetooth adapter turned off.")
+                    stopVoiceRecognition("Bluetooth is off. Voice commands are paused.")
                     handler.removeCallbacks(disconnectTimeoutRunnable)
                     disconnectTimerPending = false
                     disconnectTimeoutPassed = false
@@ -149,56 +153,36 @@ class CarMusicService : Service() {
                 }
                 return
             }
-            val device = intent.bluetoothDevice() ?: return
+            val device = getBluetoothDevice(intent) ?: return
             val address = try { device.address } catch (_: SecurityException) { return }
-            if (targetAddress.isBlank() || address != targetAddress) return
+            if (address != targetAddress || targetAddress.isBlank()) return
 
             when (intent.action) {
-                BluetoothDevice.ACTION_ACL_CONNECTED -> onCarAclConnected()
-                BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED -> {
-                    when (intent.getIntExtra(BluetoothProfile.EXTRA_STATE, BluetoothProfile.STATE_DISCONNECTED)) {
-                        BluetoothProfile.STATE_CONNECTED -> onCarAudioConnected()
-                        BluetoothProfile.STATE_DISCONNECTED -> onCarDisconnected()
+                BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                    handler.removeCallbacks(disconnectTimeoutRunnable)
+                    disconnectTimerPending = false
+                    disconnectTimeoutPassed = false
+                    if (!carConnected) {
+                        carConnected = true
+                        logEvent("Selected car connected.")
+                        startPlaylist()
+                        startVoiceRecognitionIfReady()
                     }
                 }
-                BluetoothDevice.ACTION_ACL_DISCONNECTED -> onCarDisconnected()
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    logEvent("Selected car disconnected (wasConnected=$carConnected). Saving position.")
+                    carConnected = false
+                    stopVoiceRecognition("Car disconnected. Voice commands are waiting for reconnection.")
+                    disconnectTimeoutPassed = false
+                    pausePlayback()
+                    promoteForeground(isPlaying = false)
+                    handler.removeCallbacks(disconnectTimeoutRunnable)
+                    disconnectTimerPending = true
+                    handler.postDelayed(disconnectTimeoutRunnable, BLUETOOTH_OFF_DELAY_MS)
+                    updateNotification()
+                }
             }
         }
-    }
-
-    private fun onCarAclConnected() {
-        EventLog.add(this, "Car link connected, waiting for audio")
-        handler.removeCallbacks(disconnectTimeoutRunnable)
-        disconnectTimerPending = false
-        disconnectTimeoutPassed = false
-        handler.removeCallbacks(aclCheckRunnable)
-        handler.postDelayed(aclCheckRunnable, ACL_AUDIO_CHECK_MS)
-    }
-
-    private fun onCarAudioConnected() {
-        handler.removeCallbacks(disconnectTimeoutRunnable)
-        disconnectTimerPending = false
-        disconnectTimeoutPassed = false
-        if (carConnected) return
-        carConnected = true
-        EventLog.add(this, "Car audio connected, starting playlist")
-        handler.removeCallbacks(autoPlayRunnable)
-        autoPlayAttempts = 0
-        handler.postDelayed(autoPlayRunnable, A2DP_SETTLE_MS)
-    }
-
-    private fun onCarDisconnected() {
-        handler.removeCallbacks(aclCheckRunnable)
-        if (!carConnected) return
-        carConnected = false
-        EventLog.add(this, "Car disconnected, paused and position saved")
-        disconnectTimeoutPassed = false
-        pausePlayback()
-        promoteForeground(isPlaying = false)
-        handler.removeCallbacks(disconnectTimeoutRunnable)
-        disconnectTimerPending = true
-        handler.postDelayed(disconnectTimeoutRunnable, BLUETOOTH_OFF_DELAY_MS)
-        updateNotification()
     }
 
     override fun onCreate() {
@@ -214,15 +198,45 @@ class CarMusicService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
+        if (action == ServiceActions.STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         loadSavedSettings()
         registerCarReceiver()
-        promoteForeground(isPlaying = player.isPlaying)
+        if (action == ServiceActions.START || action == ServiceActions.VOICE_START || (action == null && voiceEnabled)) {
+            checkAlreadyConnectedCar()
+        }
+        if (action == ServiceActions.START) {
+            logEvent("Auto-play monitoring started.")
+        }
+        if (action == ServiceActions.PLAY_NOW) logEvent("Play playlist now requested manually.")
+        if (action == ServiceActions.VOICE_START) {
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                voiceEnabled = false
+                getSharedPreferences(AppPrefs.FILE, MODE_PRIVATE).edit().putBoolean(AppPrefs.KEY_VOICE_ENABLED, false).apply()
+                updateVoiceStatus("Microphone permission is required to enable voice commands.")
+                logEvent("Voice commands were not enabled because microphone permission is missing.")
+                promoteForeground(isPlaying = player.isPlaying, includeMicrophone = false)
+                return START_NOT_STICKY
+            }
+            voiceEnabled = true
+            getSharedPreferences(AppPrefs.FILE, MODE_PRIVATE).edit().putBoolean(AppPrefs.KEY_VOICE_ENABLED, true).apply()
+            voiceConfidenceThreshold = getSharedPreferences(AppPrefs.FILE, MODE_PRIVATE)
+                .getFloat(AppPrefs.KEY_VOICE_CONFIDENCE, DEFAULT_VOICE_CONFIDENCE)
+            logEvent("Offline voice commands enabled by the user.")
+            promoteForeground(isPlaying = player.isPlaying, includeMicrophone = true)
+            updateVoiceStatus(if (carConnected) "Loading offline voice model…" else "Enabled. Waiting for the selected car.")
+            loadVoiceModel()
+        } else {
+            voiceEnabled = getSharedPreferences(AppPrefs.FILE, MODE_PRIVATE).getBoolean(AppPrefs.KEY_VOICE_ENABLED, false)
+            voiceConfidenceThreshold = getSharedPreferences(AppPrefs.FILE, MODE_PRIVATE)
+                .getFloat(AppPrefs.KEY_VOICE_CONFIDENCE, DEFAULT_VOICE_CONFIDENCE)
+            promoteForeground(isPlaying = player.isPlaying, includeMicrophone = voiceEnabled)
+        }
 
         when (action) {
-            null, ServiceActions.START -> checkAlreadyConnectedCar()
-            ServiceActions.CAR_ACL_CONNECTED -> onCarAclConnected()
-            ServiceActions.CAR_A2DP_CONNECTED -> onCarAudioConnected()
-            ServiceActions.PLAY_NOW -> startPlaylist()
+            ServiceActions.PLAY_NOW, ServiceActions.START -> if (action == ServiceActions.PLAY_NOW) startPlaylist()
             ServiceActions.UPDATE_QUEUE -> refreshQueue()
             ServiceActions.PAUSE -> pausePlayback()
             ServiceActions.RESUME -> resumePlayback()
@@ -230,14 +244,19 @@ class CarMusicService : Service() {
             ServiceActions.PREVIOUS -> navigate(direction = -1)
             ServiceActions.SEEK -> {
                 cancelCrossfade()
-                player.seekTo((intent?.getLongExtra(ServiceActions.EXTRA_POSITION, 0L) ?: 0L).coerceAtLeast(0L))
+                player.seekTo(intent.getLongExtra(ServiceActions.EXTRA_POSITION, 0L).coerceAtLeast(0L))
                 sendPlaybackState()
             }
             ServiceActions.SELECT_TRACK -> {
-                val index = intent?.getIntExtra(ServiceActions.EXTRA_INDEX, -1) ?: -1
+                val index = intent.getIntExtra(ServiceActions.EXTRA_INDEX, -1)
                 if (index in songUris.indices) transitionTo(index)
             }
             ServiceActions.SET_SHUFFLE, ServiceActions.SET_REPEAT -> sendPlaybackState()
+            ServiceActions.VOICE_STOP -> disableVoiceCommands()
+        }
+        if (voiceEnabled && action != ServiceActions.VOICE_START && action != ServiceActions.VOICE_STOP) {
+            loadVoiceModel()
+            startVoiceRecognitionIfReady()
         }
         updateNotification()
         return START_STICKY
@@ -246,6 +265,7 @@ class CarMusicService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun createPlayer(handleAudioFocus: Boolean = true): ExoPlayer = ExoPlayer.Builder(this)
+        .setHandleAudioBecomingNoisy(true)
         .setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), handleAudioFocus
@@ -256,6 +276,10 @@ class CarMusicService : Service() {
         target.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (target === player) {
+                    if (!isPlaying) {
+                        persistPlaybackCheckpoint(force = true)
+                        logEvent("Playback paused or audio output became noisy.")
+                    }
                     promoteForeground(isPlaying)
                     updatePlaybackState()
                     updateNotification()
@@ -300,6 +324,8 @@ class CarMusicService : Service() {
         }
         shuffleEnabled = prefs.getBoolean(AppPrefs.KEY_SHUFFLE, false)
         repeatMode = prefs.getInt(AppPrefs.KEY_REPEAT_MODE, 0).coerceIn(0, 2)
+        voiceEnabled = prefs.getBoolean(AppPrefs.KEY_VOICE_ENABLED, false)
+        voiceConfidenceThreshold = prefs.getFloat(AppPrefs.KEY_VOICE_CONFIDENCE, DEFAULT_VOICE_CONFIDENCE)
     }
 
     private fun refreshQueue() {
@@ -334,7 +360,6 @@ class CarMusicService : Service() {
         val filter = IntentFilter().apply {
             addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
             addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
-            addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
             addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
         }
         try {
@@ -349,6 +374,12 @@ class CarMusicService : Service() {
 
     private fun hasBluetoothPermission(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
         checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+
+    @Suppress("DEPRECATION")
+    private fun getBluetoothDevice(intent: Intent): BluetoothDevice? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+        else intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
 
     private fun startPlaylist() {
         if (songUris.isEmpty()) { updateNotification("Add songs to the playlist first."); return }
@@ -479,12 +510,164 @@ class CarMusicService : Service() {
     }
 
     private fun pausePlayback() {
-        handler.removeCallbacks(autoPlayRunnable)
         persistPlaybackCheckpoint(force = true)
         cancelCrossfade()
         if (::player.isInitialized) player.pause()
         updatePlaybackState()
         sendPlaybackState()
+    }
+
+    private fun loadVoiceModel() {
+        if (!voiceEnabled || voiceModel != null || voiceModelLoading) return
+        voiceModelLoading = true
+        updateVoiceStatus("Loading offline English model…")
+        StorageService.unpack(this, VOSK_ASSET_DIRECTORY, VOSK_MODEL_DIRECTORY, object : StorageService.Callback<Model> {
+            override fun onComplete(model: Model) {
+                voiceModelLoading = false
+                voiceModel = model
+                logEvent("Offline Vosk English model loaded.")
+                if (carConnected) startVoiceRecognitionIfReady()
+                else updateVoiceStatus("Model ready. Waiting for the selected car.")
+            }
+
+        }, object : StorageService.Callback<java.io.IOException> {
+            override fun onComplete(exception: java.io.IOException) {
+                voiceModelLoading = false
+                logEvent("Could not load offline voice model: ${exception.message}")
+                updateVoiceStatus("Could not load voice model. Open Event log for details.")
+            }
+        })
+    }
+
+    private fun startVoiceRecognitionIfReady() {
+        if (!voiceEnabled || !carConnected) return
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            updateVoiceStatus("Microphone permission is missing. Enable voice control again in the app.")
+            logEvent("Voice listening could not start because microphone permission is missing.")
+            return
+        }
+        if (speechService != null) return
+        val model = voiceModel
+        if (model == null) {
+            loadVoiceModel()
+            return
+        }
+        try {
+            val recognizer = Recognizer(model, VOICE_SAMPLE_RATE, VOICE_GRAMMAR)
+            recognizer.setWords(true)
+            voiceRecognizer = recognizer
+            val service = SpeechService(recognizer, VOICE_SAMPLE_RATE)
+            speechService = service
+            service.startListening(object : RecognitionListener {
+                override fun onPartialResult(hypothesis: String?) = Unit
+
+                override fun onResult(hypothesis: String?) {
+                    if (hypothesis != null) handler.post { handleVoiceTranscript(hypothesis) }
+                }
+
+                override fun onFinalResult(hypothesis: String?) {
+                    if (hypothesis != null) handler.post { handleVoiceTranscript(hypothesis) }
+                }
+
+                override fun onError(exception: Exception?) {
+                    handler.post {
+                        logEvent("Voice recognition error: ${exception?.message ?: "unknown error"}")
+                        stopVoiceRecognition("Voice recognition stopped. Re-enable voice commands to retry.")
+                    }
+                }
+
+                override fun onTimeout() = Unit
+            })
+            promoteForeground(isPlaying = player.isPlaying, includeMicrophone = true)
+            updateVoiceStatus("Listening for car play, car stop, or car next.")
+            logEvent("Voice command listening started for the connected car.")
+        } catch (exception: Exception) {
+            speechService?.stop()
+            speechService = null
+            voiceRecognizer?.close()
+            voiceRecognizer = null
+            logEvent("Could not start voice recognition: ${exception.message}")
+            updateVoiceStatus("Could not start microphone. Check permission and Event log.")
+        }
+    }
+
+    private fun stopVoiceRecognition(status: String) {
+        val wasListening = speechService != null
+        speechService?.stop()
+        speechService = null
+        voiceRecognizer?.close()
+        voiceRecognizer = null
+        if (wasListening) logEvent("Voice command listening stopped.")
+        updateVoiceStatus(if (voiceEnabled) status else "Voice commands are off.")
+        if (::player.isInitialized) promoteForeground(isPlaying = player.isPlaying, includeMicrophone = voiceEnabled)
+    }
+
+    private fun disableVoiceCommands() {
+        voiceEnabled = false
+        getSharedPreferences(AppPrefs.FILE, MODE_PRIVATE).edit().putBoolean(AppPrefs.KEY_VOICE_ENABLED, false).apply()
+        stopVoiceRecognition("Voice commands are off.")
+        logEvent("Offline voice commands disabled by the user.")
+        promoteForeground(isPlaying = player.isPlaying, includeMicrophone = false)
+    }
+
+    private fun updateVoiceStatus(status: String) {
+        sendBroadcast(Intent(ServiceActions.VOICE_STATE).setPackage(packageName)
+            .putExtra(ServiceActions.EXTRA_VOICE_ENABLED, voiceEnabled)
+            .putExtra(ServiceActions.EXTRA_VOICE_STATUS, status))
+    }
+
+    private fun handleVoiceTranscript(json: String) {
+        if (!voiceEnabled || !carConnected) return
+        try {
+            val parsed = JSONObject(json)
+            val phrase = parsed.optString("text").trim().lowercase(java.util.Locale.US)
+            if (phrase !in VOICE_COMMANDS) return
+
+            val words = parsed.optJSONArray("result")
+            val confidences = (0 until (words?.length() ?: 0)).mapNotNull { index ->
+                words?.optJSONObject(index)?.optDouble("conf", Double.NaN)?.takeIf { it.isFinite() }
+            }
+            val confidence = if (confidences.isEmpty()) 1.0 else confidences.average()
+            val threshold = getSharedPreferences(AppPrefs.FILE, MODE_PRIVATE)
+                .getFloat(AppPrefs.KEY_VOICE_CONFIDENCE, DEFAULT_VOICE_CONFIDENCE).coerceIn(0f, 0.9f)
+            if (confidence < threshold) {
+                logEvent("Voice phrase '$phrase' heard but ignored (confidence ${"%.2f".format(java.util.Locale.US, confidence)} below ${"%.2f".format(java.util.Locale.US, threshold)}).")
+                return
+            }
+
+            val now = SystemClock.elapsedRealtime()
+            if (phrase == lastVoiceCommand && now - lastVoiceCommandAtMs < COMMAND_DEBOUNCE_MS) return
+            lastVoiceCommand = phrase
+            lastVoiceCommandAtMs = now
+            logEvent("Voice command recognized: '$phrase' (confidence ${"%.2f".format(java.util.Locale.US, confidence)}).")
+            vibrateForVoiceCommand()
+            when (phrase) {
+                "car play" -> resumePlayback()
+                "car stop" -> pausePlayback()
+                "car next" -> {
+                    val next = nextIndex(direction = 1, automatic = false)
+                    if (next >= 0) {
+                        if (player.isPlaying) transitionTo(next) else loadTrack(next, play = true)
+                    }
+                }
+            }
+        } catch (exception: Exception) {
+            logEvent("Could not read voice recognition result: ${exception.message}")
+        }
+    }
+
+    private fun vibrateForVoiceCommand() {
+        try {
+            val vibrator = getSystemService(VIBRATOR_SERVICE) as Vibrator
+            if (vibrator.hasVibrator()) vibrator.vibrate(VibrationEffect.createOneShot(85L, VibrationEffect.DEFAULT_AMPLITUDE))
+        } catch (_: SecurityException) { logEvent("Vibration permission was unavailable for voice feedback.") }
+    }
+
+    private fun logEvent(message: String) {
+        val prefs = getSharedPreferences(AppPrefs.FILE, MODE_PRIVATE)
+        val timestamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+        val old = prefs.getString(AppPrefs.KEY_EVENT_LOG, "").orEmpty().lines().filter { it.isNotBlank() }
+        prefs.edit().putString(AppPrefs.KEY_EVENT_LOG, (old + "$timestamp | $message").takeLast(100).joinToString("\n")).apply()
     }
 
     private fun savePlaybackCheckpoint(uri: String, position: Long) {
@@ -563,17 +746,16 @@ class CarMusicService : Service() {
         sendBroadcast(intent)
     }
 
-    private fun promoteForeground(isPlaying: Boolean) {
+    private fun promoteForeground(isPlaying: Boolean, includeMicrophone: Boolean = voiceEnabled) {
         val notification = buildNotification()
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                if (isPlaying) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-                startForeground(NOTIFICATION_ID, notification, type)
-            } else startForeground(NOTIFICATION_ID, notification)
-        } catch (e: RuntimeException) {
-            EventLog.add(this, "Foreground start failed: ${e.javaClass.simpleName}")
-        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            if (isPlaying) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            if (includeMicrophone && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            }
+            startForeground(NOTIFICATION_ID, notification, type)
+        } else startForeground(NOTIFICATION_ID, notification)
     }
 
     private fun updateNotification(message: String? = null) {
@@ -629,6 +811,12 @@ class CarMusicService : Service() {
     @Suppress("DEPRECATION")
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        speechService?.stop()
+        speechService = null
+        voiceRecognizer?.close()
+        voiceRecognizer = null
+        voiceModel?.close()
+        voiceModel = null
         if (receiverRegistered) {
             try { unregisterReceiver(carReceiver) } catch (_: IllegalArgumentException) { }
             receiverRegistered = false
@@ -639,6 +827,7 @@ class CarMusicService : Service() {
             mediaSession.release()
         }
         if (::player.isInitialized) player.release()
+        getSharedPreferences(AppPrefs.FILE, MODE_PRIVATE).edit().putBoolean(AppPrefs.KEY_MONITORING, false).apply()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE) else stopForeground(true)
         super.onDestroy()
     }
@@ -647,12 +836,15 @@ class CarMusicService : Service() {
         private const val CHANNEL_ID = "car_music_monitor"
         private const val NOTIFICATION_ID = 7041
         private const val BLUETOOTH_OFF_DELAY_MS = 60_000L
-        private const val A2DP_SETTLE_MS = 800L
-        private const val AUTO_PLAY_RETRY_MS = 2_500L
-        private const val AUTO_PLAY_MAX_ATTEMPTS = 4
-        private const val ACL_AUDIO_CHECK_MS = 3_000L
         private const val CROSSFADE_MS = 5_000L
         private const val CHECKPOINT_INTERVAL_MS = 3_000L
+        private const val VOICE_SAMPLE_RATE = 16_000f
+        private const val VOICE_GRAMMAR = "[\"car play\", \"car stop\", \"car next\", \"[unk]\"]"
+        private val VOICE_COMMANDS = setOf("car play", "car stop", "car next")
+        private const val VOSK_ASSET_DIRECTORY = "model"
+        private const val VOSK_MODEL_DIRECTORY = "vosk-model-small-en-us-0.15"
+        private const val DEFAULT_VOICE_CONFIDENCE = 0.25f
+        private const val COMMAND_DEBOUNCE_MS = 1_500L
         private const val FADE_TICK_MS = 40L
         private const val CROSSFADE_CHECK_MS = 100L
         private const val PROGRESS_TICK_MS = 500L

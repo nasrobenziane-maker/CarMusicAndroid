@@ -11,7 +11,9 @@ internal object AppPrefs {
     const val KEY_REPEAT_MODE = "repeat_mode"
     const val KEY_LAST_TRACK_URI = "last_track_uri"
     const val KEY_LAST_POSITION_MS = "last_position_ms"
-    const val KEY_BATTERY_PROMPTED = "battery_prompted"
+    const val KEY_EVENT_LOG = "event_log"
+    const val KEY_VOICE_ENABLED = "voice_enabled"
+    const val KEY_VOICE_CONFIDENCE = "voice_confidence"
 }
 
 internal object ServiceActions {
@@ -26,10 +28,14 @@ internal object ServiceActions {
     const val SET_SHUFFLE = "com.codex.carmusic.action.SET_SHUFFLE"
     const val SET_REPEAT = "com.codex.carmusic.action.SET_REPEAT"
     const val UPDATE_QUEUE = "com.codex.carmusic.action.UPDATE_QUEUE"
-    const val CAR_ACL_CONNECTED = "com.codex.carmusic.action.CAR_ACL_CONNECTED"
-    const val CAR_A2DP_CONNECTED = "com.codex.carmusic.action.CAR_A2DP_CONNECTED"
+    const val STOP = "com.codex.carmusic.action.STOP"
+    const val VOICE_START = "com.codex.carmusic.action.VOICE_START"
+    const val VOICE_STOP = "com.codex.carmusic.action.VOICE_STOP"
 
     const val PLAYBACK_STATE = "com.codex.carmusic.action.PLAYBACK_STATE"
+    const val VOICE_STATE = "com.codex.carmusic.action.VOICE_STATE"
+    const val EXTRA_VOICE_ENABLED = "voice_enabled"
+    const val EXTRA_VOICE_STATUS = "voice_status"
     const val EXTRA_IS_PLAYING = "is_playing"
     const val EXTRA_INDEX = "track_index"
     const val EXTRA_TITLE = "track_title"
@@ -37,5 +43,4 @@ internal object ServiceActions {
     const val EXTRA_DURATION = "duration_ms"
     const val EXTRA_SHUFFLE = "shuffle_enabled"
     const val EXTRA_REPEAT = "repeat_mode"
-    const val EXTRA_AUTOSTART = "auto_start"
 }

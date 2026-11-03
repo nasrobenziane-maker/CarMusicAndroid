@@ -1,13 +1,13 @@
 package com.codex.carmusic
 
 import android.Manifest
+import android.content.res.ColorStateList
 import android.app.Activity
 import android.app.AlertDialog
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.ActivityNotFoundException
-import android.content.ComponentName
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -19,9 +19,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.PowerManager
 import android.provider.OpenableColumns
-import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.widget.ArrayAdapter
@@ -46,6 +44,10 @@ class MainActivity : Activity() {
     private lateinit var playPauseButton: Button
     private lateinit var shuffleButton: Button
     private lateinit var repeatButton: Button
+    private lateinit var voiceButton: Button
+    private lateinit var voiceStatusText: TextView
+    private lateinit var voiceConfidenceText: TextView
+    private lateinit var voiceConfidenceSeekBar: SeekBar
     private lateinit var pairedDevices: List<BluetoothDevice>
     private var enablePromptRequested = false
     private var receiverRegistered = false
@@ -56,10 +58,16 @@ class MainActivity : Activity() {
     private var shuffleEnabled = false
     private var repeatMode = 0
     private var renderedCurrentIndex = Int.MIN_VALUE
+    private var voiceRestoreRequested = false
     private val prefs by lazy { getSharedPreferences(AppPrefs.FILE, MODE_PRIVATE) }
 
     private val playbackReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == ServiceActions.VOICE_STATE) {
+                voiceStatusText.text = intent.getStringExtra(ServiceActions.EXTRA_VOICE_STATUS).orEmpty()
+                updateVoiceButton(intent.getBooleanExtra(ServiceActions.EXTRA_VOICE_ENABLED, false))
+                return
+            }
             if (intent.action != ServiceActions.PLAYBACK_STATE) return
             isPlaying = intent.getBooleanExtra(ServiceActions.EXTRA_IS_PLAYING, false)
             currentIndex = intent.getIntExtra(ServiceActions.EXTRA_INDEX, currentIndex)
@@ -87,19 +95,35 @@ class MainActivity : Activity() {
         playPauseButton = findViewById(R.id.playPauseButton)
         shuffleButton = findViewById(R.id.shuffleButton)
         repeatButton = findViewById(R.id.repeatButton)
+        voiceButton = findViewById(R.id.voiceButton)
+        voiceStatusText = findViewById(R.id.voiceStatusText)
+        voiceConfidenceText = findViewById(R.id.voiceConfidenceText)
+        voiceConfidenceSeekBar = findViewById(R.id.voiceConfidenceSeekBar)
         pairedDevices = emptyList()
         shuffleEnabled = prefs.getBoolean(AppPrefs.KEY_SHUFFLE, false)
         repeatMode = prefs.getInt(AppPrefs.KEY_REPEAT_MODE, 0)
 
         findViewById<Button>(R.id.permissionsButton).setOnClickListener { requestRequiredPermissions() }
         findViewById<Button>(R.id.refreshDevicesButton).setOnClickListener { refreshPairedDevices() }
-        findViewById<Button>(R.id.backgroundSetupButton).setOnClickListener { openBackgroundSetup() }
-        findViewById<Button>(R.id.logButton).setOnClickListener { showEventLog() }
         findViewById<Button>(R.id.pickSongsButton).setOnClickListener { pickSongs() }
         findViewById<Button>(R.id.clearPlaylistButton).setOnClickListener { clearPlaylist() }
         findViewById<Button>(R.id.startButton).setOnClickListener { startMonitoring() }
         findViewById<Button>(R.id.playNowButton).setOnClickListener { playNow() }
         findViewById<Button>(R.id.stopButton).setOnClickListener { stopMonitoring() }
+        findViewById<Button>(R.id.eventLogButton).setOnClickListener { showEventLog() }
+        voiceButton.setOnClickListener { toggleVoiceCommands() }
+        voiceConfidenceSeekBar.progress = (prefs.getFloat(AppPrefs.KEY_VOICE_CONFIDENCE, 0.25f) * 100).toInt().coerceIn(0, 90)
+        updateVoiceConfidenceLabel()
+        voiceConfidenceSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    prefs.edit().putFloat(AppPrefs.KEY_VOICE_CONFIDENCE, progress / 100f).apply()
+                    updateVoiceConfidenceLabel()
+                }
+            }
+            override fun onStopTrackingTouch(seekBar: SeekBar) = Unit
+        })
         findViewById<Button>(R.id.previousButton).setOnClickListener { sendPlayerAction(ServiceActions.PREVIOUS) }
         findViewById<Button>(R.id.nextButton).setOnClickListener { sendPlayerAction(ServiceActions.NEXT) }
         playPauseButton.setOnClickListener {
@@ -135,14 +159,12 @@ class MainActivity : Activity() {
         renderPlaylist()
         updateModeButtons()
         showSavedStatus()
-        if (intent.getBooleanExtra(ServiceActions.EXTRA_AUTOSTART, false) && prefs.getBoolean(AppPrefs.KEY_MONITORING, false)) {
-            startCarService(ServiceActions.START)
-        }
+        updateVoiceButton(prefs.getBoolean(AppPrefs.KEY_VOICE_ENABLED, false))
     }
 
     override fun onStart() {
         super.onStart()
-        val filter = IntentFilter(ServiceActions.PLAYBACK_STATE)
+        val filter = IntentFilter().apply { addAction(ServiceActions.PLAYBACK_STATE); addAction(ServiceActions.VOICE_STATE) }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(playbackReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
@@ -167,8 +189,13 @@ class MainActivity : Activity() {
             requestBluetoothEnableIfNeeded()
         }
         showSavedStatus()
+        updateVoiceButton(prefs.getBoolean(AppPrefs.KEY_VOICE_ENABLED, false))
+        if (!voiceRestoreRequested && prefs.getBoolean(AppPrefs.KEY_VOICE_ENABLED, false) && hasRecordAudioPermission()) {
+            voiceRestoreRequested = true
+            startCarService(ServiceActions.VOICE_START)
+            voiceStatusText.text = "Restoring voice control. Waiting for the car…"
+        }
     }
-
     private fun requestRequiredPermissions() {
         val needed = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
@@ -185,6 +212,16 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_VOICE_PERMISSION) {
+
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                startVoiceServiceFromVisibleApp()
+            } else {
+                voiceStatusText.text = "Microphone permission is required for voice commands."
+                toast("Allow microphone access to enable voice commands.")
+            }
+            return
+        }
         if (requestCode == REQUEST_PERMISSIONS) {
             if (hasBluetoothPermission()) {
                 refreshPairedDevices()
@@ -450,75 +487,8 @@ class MainActivity : Activity() {
             prefs.edit().putString(AppPrefs.KEY_CAR_ADDRESS, device.address)
                 .putString(AppPrefs.KEY_CAR_NAME, name).putBoolean(AppPrefs.KEY_MONITORING, true).apply()
             startCarService(ServiceActions.START)
-            EventLog.add(this, "Monitoring started for $name")
-            statusText.text = "Status: Monitoring $name. Music starts as soon as the car connects."
-            if (!isBatteryUnrestricted() && !prefs.getBoolean(AppPrefs.KEY_BATTERY_PROMPTED, false)) {
-                prefs.edit().putBoolean(AppPrefs.KEY_BATTERY_PROMPTED, true).apply()
-                requestBatteryExemption()
-            }
+            statusText.text = "Status: Waiting for $name. Reconnect the car if it is already connected."
         } catch (_: SecurityException) { toast("Allow Nearby devices permission to access the car.") }
-    }
-
-    private fun isBatteryUnrestricted(): Boolean =
-        (getSystemService(POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(packageName)
-
-    private fun requestBatteryExemption() {
-        if (isBatteryUnrestricted()) return
-        try {
-            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
-        } catch (_: Exception) {
-            openAppDetails()
-        }
-    }
-
-    private fun openAppDetails() {
-        try {
-            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
-        } catch (_: Exception) {
-            toast("Open Android Settings > Apps > Peugeot Car Music.")
-        }
-    }
-
-    private fun openAutoLaunchSettings() {
-        val candidates = listOf(
-            ComponentName("com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity"),
-            ComponentName("com.oplus.battery", "com.oplus.startupapp.StartupAppListActivity"),
-            ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity")
-        )
-        for (component in candidates) {
-            try {
-                startActivity(Intent().setComponent(component))
-                return
-            } catch (_: Exception) { }
-        }
-        toast("Enable Auto-launch for this app in the settings page that opens.")
-        openAppDetails()
-    }
-
-    private fun openBackgroundSetup() {
-        val batteryLine = if (isBatteryUnrestricted()) "Battery: unrestricted (OK)" else "Battery: still restricted"
-        AlertDialog.Builder(this)
-            .setTitle("Keep the app alive")
-            .setMessage(
-                "$batteryLine\n\nOn OPPO / ColorOS also:\n" +
-                    "1. Allow Auto-launch (Auto startup) for this app.\n" +
-                    "2. Set battery usage to Allow background activity.\n" +
-                    "3. Lock the app in the recent apps list."
-            )
-            .setPositiveButton("Battery") { _, _ -> requestBatteryExemption() }
-            .setNeutralButton("Auto-launch") { _, _ -> openAutoLaunchSettings() }
-            .setNegativeButton("Close", null)
-            .show()
-    }
-
-    private fun showEventLog() {
-        val text = EventLog.read(this).ifBlank { "No events yet." }
-        AlertDialog.Builder(this)
-            .setTitle("Event log (newest first)")
-            .setMessage(text)
-            .setPositiveButton("Close", null)
-            .setNegativeButton("Clear") { _, _ -> EventLog.clear(this) }
-            .show()
     }
 
     private fun playNow() {
@@ -534,10 +504,61 @@ class MainActivity : Activity() {
         statusText.text = "Status: Playing playlist."
     }
 
+    private fun toggleVoiceCommands() {
+        if (prefs.getBoolean(AppPrefs.KEY_VOICE_ENABLED, false)) {
+            prefs.edit().putBoolean(AppPrefs.KEY_VOICE_ENABLED, false).apply()
+            startCarService(ServiceActions.VOICE_STOP)
+            updateVoiceButton(false)
+            voiceStatusText.text = "Voice commands are off."
+            return
+        }
+        if (hasRecordAudioPermission()) startVoiceServiceFromVisibleApp()
+        else {
+
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_VOICE_PERMISSION)
+        }
+    }
+
+    private fun startVoiceServiceFromVisibleApp() {
+        if (!hasRecordAudioPermission()) return
+        prefs.edit().putBoolean(AppPrefs.KEY_VOICE_ENABLED, true).apply()
+        updateVoiceButton(true)
+        voiceStatusText.text = "Enabling offline voice commands…"
+        startCarService(ServiceActions.VOICE_START)
+    }
+
+    private fun hasRecordAudioPermission(): Boolean =
+        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    private fun updateVoiceButton(enabled: Boolean) {
+        if (!::voiceButton.isInitialized) return
+        voiceButton.text = if (enabled) "Disable voice commands" else "Enable voice commands"
+        voiceButton.backgroundTintList = ColorStateList.valueOf(if (enabled) 0xFF37546B.toInt() else 0xFF54B9FF.toInt())
+    }
+
+    private fun updateVoiceConfidenceLabel() {
+        if (!::voiceConfidenceText.isInitialized || !::voiceConfidenceSeekBar.isInitialized) return
+        voiceConfidenceText.text = "Command confidence threshold: ${voiceConfidenceSeekBar.progress}%"
+    }
+    private fun showEventLog() {
+        val log = prefs.getString(AppPrefs.KEY_EVENT_LOG, "").orEmpty().ifBlank { "No events recorded yet." }
+        AlertDialog.Builder(this)
+            .setTitle("Event log")
+            .setMessage(log)
+            .setPositiveButton("Copy") { _, _ ->
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Peugeot Car Music event log", log))
+                toast("Event log copied.")
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
     private fun stopMonitoring() {
-        prefs.edit().putBoolean(AppPrefs.KEY_MONITORING, false).apply()
+        prefs.edit().putBoolean(AppPrefs.KEY_MONITORING, false).putBoolean(AppPrefs.KEY_VOICE_ENABLED, false).apply()
         stopService(Intent(this, CarMusicService::class.java))
         statusText.text = "Status: Stopped"
+        updateVoiceButton(false)
+        if (::voiceStatusText.isInitialized) voiceStatusText.text = "Voice commands are off."
         isPlaying = false
         updateModeButtons()
     }
@@ -595,6 +616,7 @@ class MainActivity : Activity() {
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
 
     companion object {
+        private const val REQUEST_VOICE_PERMISSION = 4103
         private const val REQUEST_PERMISSIONS = 100
         private const val REQUEST_SONGS = 101
         private const val REQUEST_ENABLE_BLUETOOTH = 102

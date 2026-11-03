@@ -106,26 +106,11 @@
                         android:text="Refresh devices" />
                 </LinearLayout>
 
-                <LinearLayout
+                <Button
+                    android:id="@+id/eventLogButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <Button
-                        android:id="@+id/backgroundSetupButton"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Background setup" />
-
-                    <Button
-                        android:id="@+id/logButton"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:layout_weight="1"
-                        android:text="Event log" />
-                </LinearLayout>
+                    android:text="Event log" />
 
                 <Button
                     android:id="@+id/startButton"
@@ -136,6 +121,65 @@
                     android:textColor="#FFFFFF" />
             </LinearLayout>
 
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/panel_background"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="OFFLINE VOICE COMMANDS"
+                    android:textColor="#D7E4F4"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/voiceButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:backgroundTint="#54B9FF"
+                    android:text="Enable voice commands"
+                    android:textColor="#FFFFFF" />
+
+                <TextView
+                    android:id="@+id/voiceStatusText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="5dp"
+                    android:text="Off. Enable while this screen is open, then commands work when the car connects."
+                    android:textColor="#A9B7C9"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/voiceConfidenceText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Command confidence threshold: 25%"
+                    android:textColor="#A9B7C9"
+                    android:textSize="12sp" />
+
+                <SeekBar
+                    android:id="@+id/voiceConfidenceSeekBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="90"
+                    android:progress="25"
+                    android:progressTint="#54B9FF"
+                    android:thumbTint="#E8F4FF" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Say: car play, car stop, or car next. Recognition runs on this phone."
+                    android:textColor="#7991AA"
+                    android:textSize="12sp" />
+            </LinearLayout>
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
