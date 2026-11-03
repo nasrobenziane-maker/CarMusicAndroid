@@ -11,6 +11,7 @@ An Android app that plays a local playlist when the phone connects to the paired
 - Five-second audio crossfade between tracks, including manual previous/next. The next track is prepared and starts fading in during the final five seconds of the current track; playback also continues to the next track if the fade player is not ready in time. The current track and position are saved every few seconds and when playback pauses or the car disconnects; playback resumes from the saved position when the car reconnects. Starting auto-play also checks whether the selected car is already connected. Add songs supports multi-select. Playlist songs are numbered; swipe left to reveal the red delete button. Playlist rows show song names, reorder by long-press and drag, and remove a song with a left swipe.
 - Foreground playback notification with previous, play/pause, and next controls.
 - Automatic playback when the selected car connects.
+- On temporary audio-focus interruptions such as calls, the app cancels crossfade, saves the current position, and pauses voice listening. Playback resumes afterward only if it was playing before the interruption.
 
 ## Use
 
