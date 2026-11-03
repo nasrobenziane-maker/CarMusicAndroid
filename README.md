@@ -11,15 +11,15 @@ An Android app that plays a local playlist when the phone connects to the paired
 - Five-second audio crossfade between tracks, including manual previous/next. The next track is prepared and starts fading in during the final five seconds of the current track; playback also continues to the next track if the fade player is not ready in time. The current track and position are saved every few seconds and when playback pauses or the car disconnects; playback resumes from the saved position when the car reconnects. Starting auto-play also checks whether the selected car is already connected. Add songs supports multi-select. Playlist songs are numbered; swipe left to reveal the red delete button. Playlist rows show song names, reorder by long-press and drag, and remove a song with a left swipe.
 - Foreground playback notification with previous, play/pause, and next controls.
 - Automatic playback when the selected car connects.
-- On temporary audio-focus interruptions such as calls, the app cancels crossfade, saves the current position, and pauses voice listening. Playback resumes afterward only if it was playing before the interruption.
+- Incoming and outgoing cellular calls are detected through Android call-state monitoring. Playback pauses, crossfade is canceled, the current position is saved, and voice listening pauses. Playback resumes after the call only if it was playing before the interruption. For VoIP calls, the app also checks audio focus and communication audio mode, but some VoIP apps/devices do not expose a detectable signal.
 
 ## Use
 
-1. Open the app and grant Nearby devices and notification permissions.
+1. Open the app and grant Nearby devices, notification, and Phone state permissions. Phone state is used only to detect cellular call state; the app does not read or store caller numbers.
 2. Pair the car in Android Bluetooth settings. If Bluetooth is off, approve Android's system prompt to turn it on.
 3. Refresh paired devices and select the car.
 4. Add audio files, then press **Start auto-play**. The new songs append to the playlist; use the arrows to reorder them.
-5. Playback starts when the selected car connects. **Play playlist now** starts it manually.
+5. Playback starts when the selected car connects. The app remembers that paired car by its Bluetooth address, checks its A2DP connection when Bluetooth is turned on, and watches for its connection event. Android's Bluetooth system performs the actual reconnection for paired devices; if Android does not reconnect it, connect the car from Bluetooth settings. **Play playlist now** starts it manually.
 
 Android 13 and later do not allow ordinary apps targeting API 33+ to toggle Bluetooth directly. If the car disconnects for 60 seconds, the app offers a notification shortcut to Bluetooth settings; turn Bluetooth off there yourself.
 
