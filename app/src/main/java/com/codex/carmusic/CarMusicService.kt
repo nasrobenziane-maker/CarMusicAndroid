@@ -56,6 +56,7 @@ class CarMusicService : Service() {
     private var lastCheckpointUri = ""
     private var lastCheckpointPositionMs = -1L
     private var profileCheckPending = false
+    private var autoPlayAttempts = 0
     private val handler = Handler(Looper.getMainLooper())
 
     private val disconnectTimeoutRunnable = Runnable {
@@ -101,15 +102,32 @@ class CarMusicService : Service() {
         }
     }
 
+    private val autoPlayRunnable = object : Runnable {
+        override fun run() {
+            if (!carConnected) return
+            if (player.isPlaying) {
+                EventLog.add(this@CarMusicService, "Playing")
+                return
+            }
+            if (autoPlayAttempts >= AUTO_PLAY_MAX_ATTEMPTS) {
+                EventLog.add(this@CarMusicService, "Auto-play gave up after $autoPlayAttempts attempts")
+                return
+            }
+            autoPlayAttempts++
+            EventLog.add(this@CarMusicService, "Auto-play attempt $autoPlayAttempts")
+            startPlaylist()
+            handler.postDelayed(this, AUTO_PLAY_RETRY_MS)
+        }
+    }
+
+    private val aclCheckRunnable = Runnable { checkAlreadyConnectedCar() }
+
     private val a2dpListener = object : BluetoothProfile.ServiceListener {
         override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
             profileCheckPending = false
             if (profile == BluetoothProfile.A2DP) {
                 try {
-                    if (proxy.connectedDevices.any { it.address == targetAddress }) {
-                        carConnected = true
-                        startPlaylist()
-                    }
+                    if (proxy.connectedDevices.any { it.address == targetAddress }) onCarAudioConnected()
                 } catch (_: SecurityException) { }
                 (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter?.closeProfileProxy(profile, proxy)
             }
@@ -131,32 +149,56 @@ class CarMusicService : Service() {
                 }
                 return
             }
-            val device = getBluetoothDevice(intent) ?: return
+            val device = intent.bluetoothDevice() ?: return
             val address = try { device.address } catch (_: SecurityException) { return }
-            if (address != targetAddress || targetAddress.isBlank()) return
+            if (targetAddress.isBlank() || address != targetAddress) return
 
             when (intent.action) {
-                BluetoothDevice.ACTION_ACL_CONNECTED -> {
-                    handler.removeCallbacks(disconnectTimeoutRunnable)
-                    disconnectTimerPending = false
-                    disconnectTimeoutPassed = false
-                    if (!carConnected) {
-                        carConnected = true
-                        startPlaylist()
+                BluetoothDevice.ACTION_ACL_CONNECTED -> onCarAclConnected()
+                BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED -> {
+                    when (intent.getIntExtra(BluetoothProfile.EXTRA_STATE, BluetoothProfile.STATE_DISCONNECTED)) {
+                        BluetoothProfile.STATE_CONNECTED -> onCarAudioConnected()
+                        BluetoothProfile.STATE_DISCONNECTED -> onCarDisconnected()
                     }
                 }
-                BluetoothDevice.ACTION_ACL_DISCONNECTED -> if (carConnected) {
-                    carConnected = false
-                    disconnectTimeoutPassed = false
-                    pausePlayback()
-                    promoteForeground(isPlaying = false)
-                    handler.removeCallbacks(disconnectTimeoutRunnable)
-                    disconnectTimerPending = true
-                    handler.postDelayed(disconnectTimeoutRunnable, BLUETOOTH_OFF_DELAY_MS)
-                    updateNotification()
-                }
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> onCarDisconnected()
             }
         }
+    }
+
+    private fun onCarAclConnected() {
+        EventLog.add(this, "Car link connected, waiting for audio")
+        handler.removeCallbacks(disconnectTimeoutRunnable)
+        disconnectTimerPending = false
+        disconnectTimeoutPassed = false
+        handler.removeCallbacks(aclCheckRunnable)
+        handler.postDelayed(aclCheckRunnable, ACL_AUDIO_CHECK_MS)
+    }
+
+    private fun onCarAudioConnected() {
+        handler.removeCallbacks(disconnectTimeoutRunnable)
+        disconnectTimerPending = false
+        disconnectTimeoutPassed = false
+        if (carConnected) return
+        carConnected = true
+        EventLog.add(this, "Car audio connected, starting playlist")
+        handler.removeCallbacks(autoPlayRunnable)
+        autoPlayAttempts = 0
+        handler.postDelayed(autoPlayRunnable, A2DP_SETTLE_MS)
+    }
+
+    private fun onCarDisconnected() {
+        handler.removeCallbacks(aclCheckRunnable)
+        if (!carConnected) return
+        carConnected = false
+        EventLog.add(this, "Car disconnected, paused and position saved")
+        disconnectTimeoutPassed = false
+        pausePlayback()
+        promoteForeground(isPlaying = false)
+        handler.removeCallbacks(disconnectTimeoutRunnable)
+        disconnectTimerPending = true
+        handler.postDelayed(disconnectTimeoutRunnable, BLUETOOTH_OFF_DELAY_MS)
+        updateNotification()
     }
 
     override fun onCreate() {
@@ -172,17 +214,15 @@ class CarMusicService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
-        if (action == ServiceActions.STOP) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
         loadSavedSettings()
         registerCarReceiver()
-        if (action == ServiceActions.START) checkAlreadyConnectedCar()
         promoteForeground(isPlaying = player.isPlaying)
 
         when (action) {
-            ServiceActions.PLAY_NOW, ServiceActions.START -> if (action == ServiceActions.PLAY_NOW) startPlaylist()
+            null, ServiceActions.START -> checkAlreadyConnectedCar()
+            ServiceActions.CAR_ACL_CONNECTED -> onCarAclConnected()
+            ServiceActions.CAR_A2DP_CONNECTED -> onCarAudioConnected()
+            ServiceActions.PLAY_NOW -> startPlaylist()
             ServiceActions.UPDATE_QUEUE -> refreshQueue()
             ServiceActions.PAUSE -> pausePlayback()
             ServiceActions.RESUME -> resumePlayback()
@@ -190,11 +230,11 @@ class CarMusicService : Service() {
             ServiceActions.PREVIOUS -> navigate(direction = -1)
             ServiceActions.SEEK -> {
                 cancelCrossfade()
-                player.seekTo(intent.getLongExtra(ServiceActions.EXTRA_POSITION, 0L).coerceAtLeast(0L))
+                player.seekTo((intent?.getLongExtra(ServiceActions.EXTRA_POSITION, 0L) ?: 0L).coerceAtLeast(0L))
                 sendPlaybackState()
             }
             ServiceActions.SELECT_TRACK -> {
-                val index = intent.getIntExtra(ServiceActions.EXTRA_INDEX, -1)
+                val index = intent?.getIntExtra(ServiceActions.EXTRA_INDEX, -1) ?: -1
                 if (index in songUris.indices) transitionTo(index)
             }
             ServiceActions.SET_SHUFFLE, ServiceActions.SET_REPEAT -> sendPlaybackState()
@@ -294,6 +334,7 @@ class CarMusicService : Service() {
         val filter = IntentFilter().apply {
             addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
             addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
             addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
         }
         try {
@@ -308,12 +349,6 @@ class CarMusicService : Service() {
 
     private fun hasBluetoothPermission(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
         checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-
-    @Suppress("DEPRECATION")
-    private fun getBluetoothDevice(intent: Intent): BluetoothDevice? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-        else intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
 
     private fun startPlaylist() {
         if (songUris.isEmpty()) { updateNotification("Add songs to the playlist first."); return }
@@ -444,6 +479,7 @@ class CarMusicService : Service() {
     }
 
     private fun pausePlayback() {
+        handler.removeCallbacks(autoPlayRunnable)
         persistPlaybackCheckpoint(force = true)
         cancelCrossfade()
         if (::player.isInitialized) player.pause()
@@ -529,11 +565,15 @@ class CarMusicService : Service() {
 
     private fun promoteForeground(isPlaying: Boolean) {
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-            if (isPlaying) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            startForeground(NOTIFICATION_ID, notification, type)
-        } else startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                if (isPlaying) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                startForeground(NOTIFICATION_ID, notification, type)
+            } else startForeground(NOTIFICATION_ID, notification)
+        } catch (e: RuntimeException) {
+            EventLog.add(this, "Foreground start failed: ${e.javaClass.simpleName}")
+        }
     }
 
     private fun updateNotification(message: String? = null) {
@@ -599,7 +639,6 @@ class CarMusicService : Service() {
             mediaSession.release()
         }
         if (::player.isInitialized) player.release()
-        getSharedPreferences(AppPrefs.FILE, MODE_PRIVATE).edit().putBoolean(AppPrefs.KEY_MONITORING, false).apply()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE) else stopForeground(true)
         super.onDestroy()
     }
@@ -608,6 +647,10 @@ class CarMusicService : Service() {
         private const val CHANNEL_ID = "car_music_monitor"
         private const val NOTIFICATION_ID = 7041
         private const val BLUETOOTH_OFF_DELAY_MS = 60_000L
+        private const val A2DP_SETTLE_MS = 800L
+        private const val AUTO_PLAY_RETRY_MS = 2_500L
+        private const val AUTO_PLAY_MAX_ATTEMPTS = 4
+        private const val ACL_AUDIO_CHECK_MS = 3_000L
         private const val CROSSFADE_MS = 5_000L
         private const val CHECKPOINT_INTERVAL_MS = 3_000L
         private const val FADE_TICK_MS = 40L

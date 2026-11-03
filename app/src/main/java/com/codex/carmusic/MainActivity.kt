@@ -2,10 +2,12 @@ package com.codex.carmusic
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -17,7 +19,9 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.widget.ArrayAdapter
@@ -89,6 +93,8 @@ class MainActivity : Activity() {
 
         findViewById<Button>(R.id.permissionsButton).setOnClickListener { requestRequiredPermissions() }
         findViewById<Button>(R.id.refreshDevicesButton).setOnClickListener { refreshPairedDevices() }
+        findViewById<Button>(R.id.backgroundSetupButton).setOnClickListener { openBackgroundSetup() }
+        findViewById<Button>(R.id.logButton).setOnClickListener { showEventLog() }
         findViewById<Button>(R.id.pickSongsButton).setOnClickListener { pickSongs() }
         findViewById<Button>(R.id.clearPlaylistButton).setOnClickListener { clearPlaylist() }
         findViewById<Button>(R.id.startButton).setOnClickListener { startMonitoring() }
@@ -129,6 +135,9 @@ class MainActivity : Activity() {
         renderPlaylist()
         updateModeButtons()
         showSavedStatus()
+        if (intent.getBooleanExtra(ServiceActions.EXTRA_AUTOSTART, false) && prefs.getBoolean(AppPrefs.KEY_MONITORING, false)) {
+            startCarService(ServiceActions.START)
+        }
     }
 
     override fun onStart() {
@@ -441,8 +450,75 @@ class MainActivity : Activity() {
             prefs.edit().putString(AppPrefs.KEY_CAR_ADDRESS, device.address)
                 .putString(AppPrefs.KEY_CAR_NAME, name).putBoolean(AppPrefs.KEY_MONITORING, true).apply()
             startCarService(ServiceActions.START)
-            statusText.text = "Status: Waiting for $name. Reconnect the car if it is already connected."
+            EventLog.add(this, "Monitoring started for $name")
+            statusText.text = "Status: Monitoring $name. Music starts as soon as the car connects."
+            if (!isBatteryUnrestricted() && !prefs.getBoolean(AppPrefs.KEY_BATTERY_PROMPTED, false)) {
+                prefs.edit().putBoolean(AppPrefs.KEY_BATTERY_PROMPTED, true).apply()
+                requestBatteryExemption()
+            }
         } catch (_: SecurityException) { toast("Allow Nearby devices permission to access the car.") }
+    }
+
+    private fun isBatteryUnrestricted(): Boolean =
+        (getSystemService(POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(packageName)
+
+    private fun requestBatteryExemption() {
+        if (isBatteryUnrestricted()) return
+        try {
+            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+        } catch (_: Exception) {
+            openAppDetails()
+        }
+    }
+
+    private fun openAppDetails() {
+        try {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        } catch (_: Exception) {
+            toast("Open Android Settings > Apps > Peugeot Car Music.")
+        }
+    }
+
+    private fun openAutoLaunchSettings() {
+        val candidates = listOf(
+            ComponentName("com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity"),
+            ComponentName("com.oplus.battery", "com.oplus.startupapp.StartupAppListActivity"),
+            ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity")
+        )
+        for (component in candidates) {
+            try {
+                startActivity(Intent().setComponent(component))
+                return
+            } catch (_: Exception) { }
+        }
+        toast("Enable Auto-launch for this app in the settings page that opens.")
+        openAppDetails()
+    }
+
+    private fun openBackgroundSetup() {
+        val batteryLine = if (isBatteryUnrestricted()) "Battery: unrestricted (OK)" else "Battery: still restricted"
+        AlertDialog.Builder(this)
+            .setTitle("Keep the app alive")
+            .setMessage(
+                "$batteryLine\n\nOn OPPO / ColorOS also:\n" +
+                    "1. Allow Auto-launch (Auto startup) for this app.\n" +
+                    "2. Set battery usage to Allow background activity.\n" +
+                    "3. Lock the app in the recent apps list."
+            )
+            .setPositiveButton("Battery") { _, _ -> requestBatteryExemption() }
+            .setNeutralButton("Auto-launch") { _, _ -> openAutoLaunchSettings() }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun showEventLog() {
+        val text = EventLog.read(this).ifBlank { "No events yet." }
+        AlertDialog.Builder(this)
+            .setTitle("Event log (newest first)")
+            .setMessage(text)
+            .setPositiveButton("Close", null)
+            .setNegativeButton("Clear") { _, _ -> EventLog.clear(this) }
+            .show()
     }
 
     private fun playNow() {
